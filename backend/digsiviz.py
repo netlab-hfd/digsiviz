@@ -269,7 +269,6 @@ def handle_timemachine(data):
     time_machine_state['active'] = is_active
     if is_active:
         print([entry[0] for entry in time_machine_deque])
-        print(sys.getsizeof(time_machine_deque))
     if not is_active:
         time_machine_state["timestamp"] = None
 
