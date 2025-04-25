@@ -11,11 +11,12 @@ import re
 from collections import deque
 import concurrent.futures
 import threading
+import sys
 
 def load_yaml_from_file(file_path):
     with open(file_path, 'r') as file:
         return yaml.safe_load(file)
-    
+
 def convert_to_graph(topology):
     kinds = topology["topology"].get("kinds", {})
 
@@ -44,7 +45,7 @@ def load_clab_info():
     if result.returncode != 0:
         print("Error while retrieving clab inspect.")
         return None
-    
+
     data = json.loads(result.stdout)
     return data
 
@@ -53,7 +54,7 @@ def get_clab_ips():
     if result.returncode != 0:
         print("Error while retrieving clab inspect.")
         return None
-    
+
     data = json.loads(result.stdout)
 
     container_ips= {}
@@ -76,7 +77,7 @@ def get_clab_router_ips():
     if result.returncode != 0:
         print("Error while retrieving clab inspect.")
         return None
-    
+
     data = json.loads(result.stdout)
 
     container_ips= {}
@@ -104,7 +105,7 @@ def get_interfaces_by_name(topology, name: str):
             node, interface = endpoint.split(":")
             if node == name:
                 interfaces.append(interface)
-    
+
     return interfaces
 
 
@@ -116,6 +117,7 @@ def get_structured_data():
     routers_data = {}
 
     def fetch_router_data(hostname, ip):
+        start_time = time.time()
         connected_interfaces = get_interfaces_by_name(clab_topo, hostname)
         gnmi_paths = [f"/interface[name={interface}]" for interface in connected_interfaces]
 
@@ -141,7 +143,11 @@ def get_structured_data():
 
                         router_interfaces[interface_name]["timestamp"] = timestamp
                         router_interfaces[interface_name].update(value)
-            
+
+            elapsed_time = time.time() - start_time
+            print(f"(THREAD {hostname}) Elapsed time: {elapsed_time} seconds")
+
+
             return hostname, router_interfaces
         except Exception as e:
             print(f"Error at {hostname} ({ip}): {e}")
@@ -149,10 +155,10 @@ def get_structured_data():
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         results = executor.map(lambda args: fetch_router_data(*args), ips.items())
-        
+
     for hostname, data in results:
         routers_data[hostname] = data
-    
+
     return routers_data
 
 time_machine_deque = deque(maxlen=120)
@@ -169,8 +175,8 @@ def time_machine():
         elapsed_time = time.time() - start_time
         sleep_time = max(0.5 - elapsed_time, 0)
 
-        print(f"Elapsed time: {elapsed_time} seconds")
-        print(f"Sleeping for: {sleep_time} seconds")
+        print(f"(TOTAL)Elapsed time: {elapsed_time} seconds")
+        print(f"(TOTAL)Sleeping for: {sleep_time} seconds")
 
         time.sleep(sleep_time)
 
@@ -196,19 +202,21 @@ def get_router_values():
                 # Time Machine Mode
                 target_timestamp = time_machine_state['timestamp'] or time_machine_deque[-1][0]
                 print(f"Time Machine activated, Timestamp: {target_timestamp}")
-                
+
                 try:
                     index = next(i for i, entry in enumerate(time_machine_deque) if entry[0] == target_timestamp)
                     history_values = time_machine_deque[index][1]
                     available_timestamps = [entry[0] for entry in time_machine_deque]
-                    
+
                     socketio.emit('router_data', {'value': json.dumps(history_values)})
                     socketio.emit('available_timestamps', {'values': available_timestamps})
-                    
+
                 except StopIteration:
                     print(f"No matching timestamp found for {target_timestamp}")
-                
+
                 time.sleep(0.5)
+
+
 
         except Exception as e:
             print(f"Error in get_router_values: {e}")
