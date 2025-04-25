@@ -145,18 +145,16 @@ def get_structured_data():
                         router_interfaces[interface_name].update(value)
 
             elapsed_time = time.time() - start_time
-            print(f"(THREAD {hostname}) Elapsed time: {elapsed_time} seconds")
-
+            print(f"(ROUTER {hostname}) Elapsed time: {elapsed_time} seconds")
 
             return hostname, router_interfaces
         except Exception as e:
             print(f"Error at {hostname} ({ip}): {e}")
             return hostname, None
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        results = executor.map(lambda args: fetch_router_data(*args), ips.items())
 
-    for hostname, data in results:
+    for hostname, ip in ips.items():
+        hostname, data = fetch_router_data(hostname, ip)
         routers_data[hostname] = data
 
     return routers_data
@@ -225,7 +223,6 @@ def get_router_values():
 
 
 
-
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins":"*"}})
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -272,9 +269,9 @@ def handle_timemachine(data):
     time_machine_state['active'] = is_active
     if is_active:
         print([entry[0] for entry in time_machine_deque])
+        print(sys.getsizeof(time_machine_deque))
     if not is_active:
         time_machine_state["timestamp"] = None
-
 
 
 if __name__ == '__main__':
