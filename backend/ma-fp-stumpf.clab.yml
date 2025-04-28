@@ -24,6 +24,7 @@ topology:
       #startup-config: config/acn-dcn-scenario1-mstp-ceos1.cfg
       #mgmt_ipv4: 172.100.100.10
       #mgmt_ipv6: 2001:172:100:100::10
+      startup-config: config/r1-bgp.cfg
     r2:
       #kind: ceos
       #image: ceos:4.33.0F
@@ -32,6 +33,7 @@ topology:
       #startup-config: config/acn-dcn-scenario1-mstp-ceos2.cfg
       #mgmt_ipv4: 172.100.100.20
       #mgmt_ipv6: 2001:172:100:100::20
+      startup-config: config/r2-bgp.cfg
     r3:
       #kind: ceos
       #image: ceos:4.33.0F
@@ -40,6 +42,7 @@ topology:
       #startup-config: config/acn-dcn-scenario1-mstp-ceos3.cfg
       #mgmt_ipv4: 172.100.100.30
       #mgmt_ipv6: 2001:172:100:100::30
+      startup-config: config/r3-bgp.cfg
     h1:
       kind: linux
       group: hosts
