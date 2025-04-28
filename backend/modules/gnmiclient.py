@@ -13,6 +13,8 @@ class GnmiClient():
     password = "NokiaSrl1!"
     port = 57401
 
+    router_ips = None
+
 
     def __init__(self, yamlinterpreter: YamlInterpreter, clabassistant: ClabAssistant,  username = "admin", password = "NokiaSrl1!", port = 57401):
         super().__init__()
@@ -21,6 +23,7 @@ class GnmiClient():
         self.port = 57401
         self.yaml = yamlinterpreter
         self.clab = clabassistant
+        self.router_ips = self.clab.get_clab_router_ips()
 
 
     def fetch_router_data(self, hostname, ip):
@@ -68,10 +71,9 @@ class GnmiClient():
 
         
     def get_structured_data_serial(self):
-        ips = self.clab.get_clab_router_ips()
         routers_data = {}
 
-        for hostname, ip in ips.items():
+        for hostname, ip in self.router_ips.items():
             hostname, data = self.fetch_router_data(hostname, ip)
             routers_data[hostname] = data
         
@@ -79,11 +81,10 @@ class GnmiClient():
     
 
     def get_structured_data_parallel(self):
-        ips = self.clab.get_clab_router_ips()
         routers_data = {}
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            results = executor.map(lambda args: self.fetch_router_data(*args), ips.items())
+            results = executor.map(lambda args: self.fetch_router_data(*args), self.router_ips.items())
 
         for hostname, data in results:
             routers_data[hostname] = data
