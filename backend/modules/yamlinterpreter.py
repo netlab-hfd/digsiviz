@@ -1,6 +1,11 @@
 import yaml
 
 class YamlInterpreter():
+    """
+    Helps to fetch topology information from the utilized Clab Yaml that was used to create the Containerlab environment.
+    """
+
+
     def __init__(self, filepath: str):
         super().__init__()
         self.filepath = filepath
@@ -12,12 +17,18 @@ class YamlInterpreter():
     topology_graph = None
 
     def load_yaml_from_file(self):
+        """
+        Loads the yaml from self.filepath that was set during init.
+        """
         with open(self.filepath, 'r') as file:
             self.topology_yaml = yaml.safe_load(file)
             return self.topology_yaml
         
         
     def get_topology_graph_from_yaml(self):
+        """
+        Gets topology graph data from imported YAML
+        """
         topology = self.load_yaml_from_file()
         kinds = topology["topology"].get("kinds", {})
 
@@ -45,6 +56,9 @@ class YamlInterpreter():
         return self.topology_graph
     
     def get_interfaces_by_name(self, name: str):
+        """
+        Return connected interfaces that were defined in the clab yaml by hostnames.
+        """
         interfaces = []
         for link in self.topology_graph["links"]: 
             source = link["source"]

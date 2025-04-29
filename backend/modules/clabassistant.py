@@ -3,12 +3,20 @@ import yaml
 import subprocess
 
 class ClabAssistant():
+
+    """
+    Helps to retrieve data from Containerlab CLI 
+    """
+
     def __init__(self):
         super().__init__()
         self.clab_info = self.load_clab_info()
         self.clab_router_ips = self.get_clab_router_ips()
         
     def load_clab_info(self):
+        """
+        Runs clab inspect and returns information as JSON.
+        """
         result = subprocess.run(["clab", "inspect", "--format", "json"], capture_output=True, text=True)
         if result.returncode != 0:
             print("Error while retrieving clab inspect.")
@@ -19,6 +27,9 @@ class ClabAssistant():
 
 
     def get_clab_router_ips(self):
+        """
+        Returns every router IP that was found in clab inspect CLI command.
+        """
         result = subprocess.run(["clab", "inspect", "--format", "json"], capture_output=True, text=True)
         if result.returncode != 0:
             print("Error while retrieving clab inspect.")

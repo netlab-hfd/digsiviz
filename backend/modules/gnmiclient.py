@@ -7,13 +7,19 @@ import concurrent.futures
 import threading
 
 class GnmiClient():
-    
+    """
+    Helper class to utilize pygnmi library to fetch gNMI data from routers of the topology using different methods and return it in a structured way.
+    """
     
     username = "admin"
     password = "NokiaSrl1!"
     port = 57401
 
     router_ips = None
+
+
+    subscription_data = None
+    subscription_lock = None
 
 
     def __init__(self, yamlinterpreter: YamlInterpreter, clabassistant: ClabAssistant,  username = "admin", password = "NokiaSrl1!", port = 57401):
@@ -27,6 +33,9 @@ class GnmiClient():
 
 
     def fetch_router_data(self, hostname, ip):
+        """
+        Fetches router data of a certain hostname and router IP using the gNMI GET command. Returns hostname and the gNMI data sorted by interfaces.
+        """
         start_time = time.time()
 
         gnmi_defaults = {"username": self.username, "password": self.password, "port": self.port}
@@ -71,6 +80,9 @@ class GnmiClient():
 
         
     def get_structured_data_serial(self):
+        """
+        Runs the gNMI GET command for each router in the topology in serial.
+        """
         routers_data = {}
 
         for hostname, ip in self.router_ips.items():
@@ -81,6 +93,9 @@ class GnmiClient():
     
 
     def get_structured_data_parallel(self):
+        """
+        Runs the gNMI GET command for each router in the topology in parallel.
+        """
         routers_data = {}
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -90,3 +105,94 @@ class GnmiClient():
             routers_data[hostname] = data
         
         return routers_data
+    
+
+
+    def subscribe_gnmi_data(self):
+        """
+        Subscribes to the router data using gNMI SUBSCRIBE command. After a initial retrieval of all data, only changed values will be pushed and refreshed. Data is written to self.subscription_data! (ON_CHANGE mode)
+        """
+        if self.subscription_data is None:
+            print("Initial fetch of all router data...")
+            self.subscription_data = self.get_structured_data_parallel()
+
+        self.subscription_lock = threading.Lock()
+
+        gnmi_defaults = {"username": self.username, "password": self.password, "port": self.port}
+
+        def set_nested(d, keys, value):
+            for key in keys[:-1]:
+                if key not in d:
+                    d[key] = {}
+                d = d[key]
+            d[keys[-1]] = value
+
+        def handle_updates(hostname, ip):
+            while True:
+                target = (ip, gnmi_defaults["port"])
+                credentials = (gnmi_defaults["username"], gnmi_defaults["password"])
+
+                connected_interfaces = self.yaml.get_interfaces_by_name(hostname)
+
+                subscription = {
+                    'subscription': [
+                        {
+                            'path': f'/interface[name={interface}]',
+                            'mode': 'on_change'
+                        } for interface in connected_interfaces
+                    ],
+                    'mode': 'stream',
+                    'encoding': 'json'
+                }
+
+                try:
+                    with gNMIclient(target=target, username=credentials[0], password=credentials[1], insecure=True) as gnmi:
+                        print(f"(Router {hostname}) Starting gNMI subscription...")
+
+                        for response in gnmi.subscribe2(subscribe=subscription):
+                            if 'update' in response:
+                                for update in response['update'].get('update', []):
+                                    path_str = update['path']
+                                    match = re.search(r"interface\[name=(.*?)\](.*)", path_str)
+
+                                    if not match:
+                                        print(f"Unexpected path format: {path_str}")
+                                        continue
+
+                                    interface_name = match.group(1)
+                                    subpath = match.group(2).lstrip('/')
+
+                                    value = update.get('val', None)
+                                    if value is None:
+                                        print(f"'val' missing for {interface_name} / {subpath}. Message: {value}")
+                                        continue
+
+                                    timestamp = response['update'].get('timestamp', time.time())
+
+                                    with self.subscription_lock:
+                                        if hostname not in self.subscription_data:
+                                            self.subscription_data[hostname] = {}
+
+                                        if interface_name not in self.subscription_data[hostname]:
+                                            self.subscription_data[hostname][interface_name] = {}
+
+                                        self.subscription_data[hostname][interface_name]["timestamp"] = timestamp
+
+                                        if subpath:
+                                            fields = subpath.split('/')
+                                            set_nested(self.subscription_data[hostname][interface_name], fields, value)
+                                        else:
+                                            if isinstance(value, dict):
+                                                self.subscription_data[hostname][interface_name].update(value)
+                                            else:
+                                                self.subscription_data[hostname][interface_name]["value"] = value
+
+                except Exception as e:
+                    print(f"Subscription error on {hostname} ({ip}): {e}")
+                    print(f"Retrying subscription for {hostname} in 5 seconds...")
+                    time.sleep(5)
+
+        for hostname, ip in self.router_ips.items():
+            thread = threading.Thread(target=handle_updates, args=(hostname, ip), daemon=True)
+            thread.start()
+
