@@ -34,6 +34,22 @@ const TopologyVisualization: React.FC = () => {
     const [filter, setFilter] = useState<string>("all");
     const fgRef = useRef<any>(null);
 
+
+    const imageCache = useRef<{ [key: string]: HTMLImageElement }>({});
+
+    const getImage = (type: string) => {
+        if (imageCache.current[type]) return imageCache.current[type];
+
+        const img = new Image();
+        if (type === "r") img.src = "/network-symbols/iRouter.png";
+        if (type === "h") img.src = "/network-symbols/iWorkstation.png";
+        if (type === "s") img.src = "/network-symbols/iSwitch.png";
+
+        imageCache.current[type] = img;
+        return img;
+    };
+
+
     useEffect(() => {
         socket.on('router_data', (data: { value: string }) => {
             try {
@@ -267,20 +283,12 @@ const TopologyVisualization: React.FC = () => {
                                 ctx.fillText(node.kind, node.x, node.y + 10);
 
                                 // Bild für Knoten
-                                const img = new Image();
-                                if (node.id.substring(0, 1) == "r") {
-                                    img.src = "/network-symbols/iRouter.png"
-                                }
-                                if (node.id.substring(0, 1) == "h") {
-                                    img.src = "/network-symbols/iWorkstation.png"
-                                }
-                                if (node.id.substring(0, 1) == "s") {
-                                    img.src = "/network-symbols/iSwitch.png"
-                                }
+                                const type = node.id.substring(0, 1);
+                                const img = getImage(type);
 
                                 const size = 12;
 
-                                ctx.drawImage(img, node.x - size / 2, node.y - size / 2, size, size)
+                                ctx.drawImage(img, node.x - size / 2, node.y - size / 2, size, size);
 
                                 ctx.fillStyle = "black";
                                 ctx.fillText(node.id, node.x, node.y - 10);
