@@ -24,7 +24,7 @@ interface GraphData {
     links: Link[];
 }
 
-const socket = io('http://localhost:5000');
+const socket = io('http://127.0.0.1:5000');
 
 const TopologyVisualization: React.FC = () => {
     const [routerData, setRouterData] = useState<any>(null);
@@ -50,7 +50,7 @@ const TopologyVisualization: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        fetch("http://localhost:5000/topology")
+        fetch("http://127.0.0.1:5000/topology", {headers: {'Access-Control-Allow-Origin': '*'}})
             .then(response => response.json())
             .then(data => setGraphData(data))
             .catch(error => console.error("Fehler beim Laden der Topologie:", error));

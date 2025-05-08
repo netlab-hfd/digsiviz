@@ -18,7 +18,7 @@ const ClabInfo: React.FC = () => {
     const [clabData, setClabData] = useState<Container[]>([]);
 
     useEffect(() => {
-        fetch("http://localhost:5000/clab-info")
+        fetch("http://127.0.0.1:5000/clab-info")
             .then((response) => response.json())
             .then((data) => {
                 setClabData(data.containers || []);
