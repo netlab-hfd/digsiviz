@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import io from "socket.io-client";
 import "./index.css"
 
-const socket = io("http://localhost:5000"); // Passe die URL an
+const socket = io("http://127.0.0.1:5000");
 
 const TimeMachine: React.FC = () => {
     const [isLive, setIsLive] = useState(true);
