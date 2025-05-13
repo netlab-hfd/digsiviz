@@ -4,6 +4,7 @@ import {forceCollide, forceLink, forceManyBody} from 'd3';
 import "./index.css";
 import io from 'socket.io-client';
 import TimeMachine from "./TimeMachine.tsx";
+import TimeMachineStats from "./TimeMachineStats.tsx";
 
 interface Node {
     id: string;
@@ -64,6 +65,7 @@ const TopologyVisualization: React.FC = () => {
             socket.off('router_data');
         };
     }, []);
+
 
     useEffect(() => {
         fetch("http://127.0.0.1:5000/topology", {headers: {'Access-Control-Allow-Origin': '*'}})
@@ -233,7 +235,7 @@ const TopologyVisualization: React.FC = () => {
 
     return (
         <div className="flex flex-col h-full w-screen">
-
+            <TimeMachineStats/>
             <div className="container-fluid d-flex p-0 h-screen">
                 <div className="row flex-grow-1 m-0 h-full">
                     {/* Linke Spalte (Echtzeit-Infos)*/}

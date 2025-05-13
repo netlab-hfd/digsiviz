@@ -5,6 +5,7 @@ from collections import deque
 import threading
 from modules.gnmiclient import GnmiClient
 from modules.enum.timemachine_mode import Gnmi_Mode
+from modules.statistics import Statistics
 import copy
 
 class TimeMachine():
@@ -26,6 +27,7 @@ class TimeMachine():
         self.socketio = socketio
         self.gnmiclient = gnmiclient
         self.gnmimode = gnmimode
+        self.stats = Statistics(self.socketio)
 
 
     def time_machine(self,  mode: Gnmi_Mode = Gnmi_Mode.GET_PARALLEL):
@@ -76,6 +78,7 @@ class TimeMachine():
                     available_timestamps = [entry[0] for entry in self.time_machine_deque]
                     self.socketio.emit('router_data', {'value': json.dumps(response)})
                     self.socketio.emit('available_timestamps', {'values': available_timestamps})
+                    self.stats.calculate_timestamp_deviation(current_timestamp,response)
                     self.time_machine_deque_copy = copy.deepcopy(self.time_machine_deque)
 
                 else:
@@ -88,6 +91,8 @@ class TimeMachine():
                         index = next(i for i, entry in enumerate(self.time_machine_deque) if entry[0] == target_timestamp)
                         history_values = self.time_machine_deque_copy[index][1]
                         available_timestamps = [entry[0] for entry in self.time_machine_deque_copy]
+
+                        self.stats.calculate_timestamp_deviation(self.time_machine_deque_copy[index][0],history_values)
                         
                         self.socketio.emit('router_data', {'value': json.dumps(history_values)})
                         self.socketio.emit('available_timestamps', {'values': available_timestamps})
@@ -95,7 +100,7 @@ class TimeMachine():
                     except StopIteration:
                         print(f"No matching timestamp found for {target_timestamp}")
 
-                    time.sleep(0.5)
+                    time.sleep(1)
             except Exception as e:
                 print(f"Error in get_router_values: {e}")
                 self.socketio.emit('error', {'message': str(e)})
