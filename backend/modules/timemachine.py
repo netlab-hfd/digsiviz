@@ -4,10 +4,13 @@ import time
 from collections import deque
 import threading
 from modules.gnmiclient import GnmiClient
+from modules.enum.timemachine_mode import Gnmi_Mode
+import copy
 
 class TimeMachine():
-
-
+    """
+    Stores gNMI data that were fetched by GnmiClient object
+    """
 
     time_machine_deque = deque(maxlen=120)
     time_machine_lock = threading.Lock()
@@ -16,19 +19,41 @@ class TimeMachine():
     'active': False
     }
 
+    time_machine_deque_copy = None
 
-    def __init__(self, socketio: SocketIO, gnmiclient: GnmiClient):
+    def __init__(self, socketio: SocketIO, gnmiclient: GnmiClient, gnmimode : Gnmi_Mode = Gnmi_Mode.GET_PARALLEL):
         super().__init__()
         self.socketio = socketio
         self.gnmiclient = gnmiclient
+        self.gnmimode = gnmimode
 
 
-    def time_machine(self):
+    def time_machine(self,  mode: Gnmi_Mode = Gnmi_Mode.GET_PARALLEL):
+        """
+        Uses GnmiClient to retrieve data and stores it with an unique time stamp to a deque. Returns the last value of the deque (current value).
+        """
         with self.time_machine_lock:
             start_time = time.time()
-            data = self.gnmiclient.get_structured_data_parallel()
+
+            if(mode == Gnmi_Mode.GET_SERIAL):
+                data = self.gnmiclient.get_structured_data_serial()
+
+            if(mode == Gnmi_Mode.GET_PARALLEL):
+                data = self.gnmiclient.get_structured_data_parallel()
+
+            if(mode == Gnmi_Mode.SUBSCRIBE_ON_CHANGE):
+                if self.gnmiclient.subscription_data is None:
+                    self.gnmiclient.subscribe_gnmi_data()
+
+                data = self.gnmiclient.subscription_data
+
+
             timestamp_utc = time.time()
-            self.time_machine_deque.append((timestamp_utc, data))
+
+            if (mode == Gnmi_Mode.SUBSCRIBE_ON_CHANGE):
+                self.time_machine_deque.append((timestamp_utc, copy.deepcopy(data)))
+            else:
+                self.time_machine_deque.append((timestamp_utc, data))
 
             elapsed_time = time.time() - start_time
             sleep_time = max(0.5 - elapsed_time, 0)
@@ -41,24 +66,29 @@ class TimeMachine():
             return self.time_machine_deque[-1]
         
     def get_router_values(self):
+        """
+        Controls the time machine functionality depending on the currently set mode (current value or historical value). Emits the value through web socket.
+        """
         while True:
             try:
                 if not self.time_machine_state['active'] and self.time_machine_state['timestamp'] is None:
-                    current_timestamp, response = self.time_machine()
+                    current_timestamp, response = self.time_machine(self.gnmimode)
                     available_timestamps = [entry[0] for entry in self.time_machine_deque]
                     self.socketio.emit('router_data', {'value': json.dumps(response)})
                     self.socketio.emit('available_timestamps', {'values': available_timestamps})
+                    self.time_machine_deque_copy = copy.deepcopy(self.time_machine_deque)
 
                 else:
                     target_timestamp = self.time_machine_state['timestamp'] or self.time_machine_deque[-1][0]
                 
                     print(f"Time Machine activated, Timestamp: {target_timestamp}")
+                    
 
                     try:
                         index = next(i for i, entry in enumerate(self.time_machine_deque) if entry[0] == target_timestamp)
-                        history_values = self.time_machine_deque[index][1]
-                        available_timestamps = [entry[0] for entry in self.time_machine_deque]
-
+                        history_values = self.time_machine_deque_copy[index][1]
+                        available_timestamps = [entry[0] for entry in self.time_machine_deque_copy]
+                        
                         self.socketio.emit('router_data', {'value': json.dumps(history_values)})
                         self.socketio.emit('available_timestamps', {'values': available_timestamps})
 
