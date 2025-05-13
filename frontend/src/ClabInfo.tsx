@@ -1,29 +1,17 @@
 import { useEffect, useState } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
 
-type Container = {
-    container_id: string;
-    name: string;
-    ipv4_address?: string;
-    ipv6_address?: string;
-    state: string;
-    group?: string;
-    image?: string;
-    kind?: string;
-    lab_name?: string;
-    [key: string]: any;
-};
 
 const ClabInfo: React.FC = () => {
-    const [clabData, setClabData] = useState<Container[]>([]);
+    const [clabData, setClabData] = useState<any>([]);
 
     useEffect(() => {
         fetch("http://127.0.0.1:5000/clab-info")
             .then((response) => response.json())
             .then((data) => {
-                setClabData(data.containers || []);
+                setClabData(Object.values(data).flat() || []);
             })
-            .catch((error) => console.error("Fehler beim Laden der Topologie:", error));
+            .catch((error) => console.error("Error retrieving topology:", error));
     }, []);
 
     return (
