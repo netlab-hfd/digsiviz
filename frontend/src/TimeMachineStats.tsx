@@ -5,16 +5,17 @@ import { Sparklines, SparklinesLine } from "react-sparklines";
 const socket = io("http://127.0.0.1:5000");
 
 const TimeMachineStats: React.FC = () => {
-    const [stdDeviation, setStdDeviation] = useState<number | null>(null);
-    const [backendTimestamp, setBackendTimestamp] = useState<number | null>(null);
-    const [backendCycleDuration, setBackendCycleDuration] = useState<number | null>(null);
+    const [routerTimeStampStdDeviation, setRouterTimeStampStdDeviation] = useState<number | null>(null);
+    const [routerTimeStampStdDeviationHistory, setRouterTimeStampStdDeviationHistory] = useState<number[]>([]);
+    const [gnmiDataCollectionTimeStamp, setGnmiDataCollectionTimeStamp] = useState<number | null>(null);
+    const [backendDataPollingCycleDuration, setBackendDataPollingCycleDuration] = useState<number | null>(null);
     const [frontendTimestamp, setFrontendTimestamp] = useState<number | null>(null);
-    const [minTimestamp, setMinTimestamp] = useState<number | null>(null);
-    const [timeStampDiff, setTimeStampDiff] = useState<number | null>(null);
-    const [cycleStartTime, setCycleStartTime] = useState<number | null>(null);
-    const [cycleStartToRenderDifference, setCycleStartToRenderDifference] = useState<number | null>(null);
-    const [pollDuration, setPollDuration] = useState<number | null>(null);
-    const [history, setHistory] = useState<number[]>([]);
+    const [minRouterTimeStamp, setMinRouterTimeStamp] = useState<number | null>(null);
+    const [minRouterTimeStampToRenderDuration, setMinRouterTimeStampToRenderDuration] = useState<number | null>(null);
+    const [backendDataPollingCycleStartTime, setBackendDataPollingCycleStartTime] = useState<number | null>(null);
+    const [backendDataPollingCycleStartToRenderDuration, setBackendDataPollingCycleStartToRenderDuration] = useState<number | null>(null);
+    const [gnmiPollingDuration, setGnmiPollingDuration] = useState<number | null>(null);
+
 
 
     const formatTimestamp = (timestampMs: number | null) => {
@@ -28,49 +29,52 @@ const TimeMachineStats: React.FC = () => {
 
     useEffect(() => {
         socket.on("timemachine_stats", (data) => {
+
             const now = Date.now()
             setFrontendTimestamp(now);
-            if (data?.deviation_ms !== undefined) {
-                const deviation = data.deviation_ms;
-                setStdDeviation(deviation);
 
-                setHistory(prev => {
+            if (data?.router_timestamp_deviation_ms !== undefined) {
+                const deviation = data.router_timestamp_deviation_ms;
+                setRouterTimeStampStdDeviation(deviation);
+
+                setRouterTimeStampStdDeviationHistory(prev => {
                     const updated = [...prev, deviation];
                     return updated.length > 120 ? updated.slice(updated.length - 120) : updated;
                 });
             }
 
-            if (data?.min_timestamp_ms !== undefined) {
-                const minTs = data.min_timestamp_ms
-                setMinTimestamp(minTs);
-                const minRouterToRenderDifference = now - minTs
-                setTimeStampDiff(minRouterToRenderDifference);
+            if (data?.min_router_timestamp_ms !== undefined) {
+                const minTs = data.min_router_timestamp_ms
+                setMinRouterTimeStamp(minTs);
+                const minRouterTsToRenderDuration = now - minTs
+                setMinRouterTimeStampToRenderDuration(minRouterTsToRenderDuration);
 
 
             }
 
 
-            if(data?.cycle_starttime_ms != undefined){
-                const cycleStartTime = data.cycle_starttime_ms;
-                setCycleStartTime(cycleStartTime);
-                const cycleStartToRenderDifference = now - cycleStartTime;
-                setCycleStartToRenderDifference(cycleStartToRenderDifference);
+            if(data?.datapolling_cycle_starttime_ms != undefined){
+                const cycleStartTime = data.datapolling_cycle_starttime_ms;
+                setBackendDataPollingCycleStartTime(cycleStartTime);
+
+                const cycleStartToRenderDuration = now - cycleStartTime;
+                setBackendDataPollingCycleStartToRenderDuration(cycleStartToRenderDuration);
 
             }
 
-            if (data?.general_timestamp_ms !== undefined) {
-                const backendTs = data.general_timestamp_ms;
-                setBackendTimestamp(backendTs);
+            if (data?.gnmi_data_collection_timestamp_ms !== undefined) {
+                const backendTs = data.gnmi_data_collection_timestamp_ms;
+                setGnmiDataCollectionTimeStamp(backendTs);
             }
 
-            if(data?.cycle_duration_ms != undefined){
-                const backendCycleDuration = data.cycle_duration_ms;
-                setBackendCycleDuration(backendCycleDuration);
+            if(data?.datapolling_cycle_duration_ms != undefined){
+                const dataPollingCycleDuration = data.datapolling_cycle_duration_ms;
+                setBackendDataPollingCycleDuration(dataPollingCycleDuration);
             }
 
-            if(data?.poll_duration_ms != undefined){
-                const pollDuration = data.poll_duration_ms;
-                setPollDuration(pollDuration);
+            if(data?.gnmi_polling_duration_ms != undefined){
+                const pollDuration = data.gnmi_polling_duration_ms;
+                setGnmiPollingDuration(pollDuration);
             }
 
         });
@@ -81,10 +85,10 @@ const TimeMachineStats: React.FC = () => {
     }, []);
 
     const average = useMemo(() => {
-        if (history.length === 0) return null;
-        const sum = history.reduce((acc, val) => acc + val, 0);
-        return sum / history.length;
-    }, [history]);
+        if (routerTimeStampStdDeviationHistory.length === 0) return null;
+        const sum = routerTimeStampStdDeviationHistory.reduce((acc, val) => acc + val, 0);
+        return sum / routerTimeStampStdDeviationHistory.length;
+    }, [routerTimeStampStdDeviationHistory]);
 
 
     return (
@@ -92,11 +96,11 @@ const TimeMachineStats: React.FC = () => {
             <div className="font-bold text-xl mt-3 mb-1 text-center text-decoration-underline">NDT Values</div>
             <div className="font-semibold mb-1 text-center">Std Dev. between routers</div>
             <div className="text-center text-lg">
-                {stdDeviation !== null ? stdDeviation.toFixed(4) : "–"}
+                {routerTimeStampStdDeviation !== null ? routerTimeStampStdDeviation.toFixed(4) : "–"}
             </div>
 
             <div className="mt-2">
-                <Sparklines data={history} limit={120} height={100}>
+                <Sparklines data={routerTimeStampStdDeviationHistory} limit={120} height={100}>
                     <SparklinesLine color="cyan" style={{ strokeWidth: 1.5, fill: "none" }} />
                 </Sparklines>
             </div>
@@ -108,28 +112,28 @@ const TimeMachineStats: React.FC = () => {
 
             <div className="font-semibold mt-3 mb-1 text-center">Min Router Timestamp</div>
             <div className="text-center text-xs">
-                {formatTimestamp(minTimestamp)}
+                {formatTimestamp(minRouterTimeStamp)}
             </div>
 
             <div className="font-bold text-xl mt-3 mb-1 text-center text-decoration-underline">Backend Values</div>
             <div className="font-semibold mt-3 mb-1 text-center">Polling Cycle Start Time</div>
             <div className="text-center text-xs">
-                {formatTimestamp(cycleStartTime)}
+                {formatTimestamp(backendDataPollingCycleStartTime)}
             </div>
 
             <div className="font-semibold mt-3 mb-1 text-center">gNMI General (End) Timestamp</div>
             <div className="text-center text-xs">
-                {formatTimestamp(backendTimestamp)}
+                {formatTimestamp(gnmiDataCollectionTimeStamp)}
             </div>
 
             <div className="font-semibold mt-3 mb-1 text-center">gNMI Poll Duration</div>
             <div className="text-center text-xs">
-                {pollDuration} ms
+                {gnmiPollingDuration} ms
             </div>
 
             <div className="font-semibold mt-3 mb-1 text-center">Backend Cycle Duration</div>
             <div className="text-center text-xs">
-                {backendCycleDuration} ms
+                {backendDataPollingCycleDuration} ms
             </div>
 
 
@@ -145,14 +149,14 @@ const TimeMachineStats: React.FC = () => {
 
                 <div className="font-semibold mt-3 mb-1 text-center">Min Router Timestamp to Render Duration</div>
                 <div className="text-center text-xs">
-                    {timeStampDiff} ms
+                    {minRouterTimeStampToRenderDuration} ms
                 </div>
 
 
 
             <div className="font-semibold mt-3 mb-1 text-center">Cycle Start Time to Render Duration</div>
             <div className="text-center text-xs">
-                {cycleStartToRenderDifference} ms
+                {backendDataPollingCycleStartToRenderDuration} ms
             </div>
 
 

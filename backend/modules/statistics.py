@@ -8,24 +8,25 @@ class Statistics:
         super().__init__()
         self.socketio = socketio
 
-    def send_statistics(self, general_timestamp, router_data, cycle_starttime=None, poll_duration=None):
-        general_timestamp_ms = general_timestamp * 1000 if general_timestamp else None
-        cycle_starttime_ms = cycle_starttime * 1000 if cycle_starttime else None
+    def send_statistics(self, gnmi_data_collection_timestamp, router_data, datapolling_cycle_starttime=None, gnmi_polling_duration=None):
+        gnmi_data_collection_timestamp_ms = gnmi_data_collection_timestamp * 1000 if gnmi_data_collection_timestamp else None
+        datapolling_cycle_starttime_ms = datapolling_cycle_starttime * 1000 if datapolling_cycle_starttime else None
 
-        poll_duration_ms = poll_duration * 1000 if poll_duration is not None else None
+        gnmi_polling_duration_ms = gnmi_polling_duration * 1000 if gnmi_polling_duration is not None else None
 
         router_timestamp_deviation_ms = self.calculate_router_timestamp_deviation(router_data)
-        min_timestamp_ms = self.get_min_timestamp(router_data)
+        min_router_timestamp_ms = self.get_min_router_timestamp(router_data)
 
-        cycle_duration_ms = (general_timestamp - cycle_starttime) * 1000 if cycle_starttime else None
+        datapolling_cycle_duration_ms = (gnmi_data_collection_timestamp_ms - datapolling_cycle_starttime_ms) if datapolling_cycle_starttime_ms else None
+
 
         self.socketio.emit('timemachine_stats', {
-            'deviation_ms': router_timestamp_deviation_ms,
-            'min_timestamp_ms': min_timestamp_ms,
-            'cycle_starttime_ms': cycle_starttime_ms,
-            'general_timestamp_ms': general_timestamp_ms,
-            'cycle_duration_ms': cycle_duration_ms,
-            'poll_duration_ms': poll_duration_ms
+            'router_timestamp_deviation_ms': router_timestamp_deviation_ms,
+            'min_router_timestamp_ms': min_router_timestamp_ms,
+            'datapolling_cycle_starttime_ms': datapolling_cycle_starttime_ms,
+            'gnmi_data_collection_timestamp_ms': gnmi_data_collection_timestamp_ms,
+            'datapolling_cycle_duration_ms': datapolling_cycle_duration_ms,
+            'gnmi_polling_duration_ms': gnmi_polling_duration_ms
         })
 
     def calculate_router_timestamp_deviation(self, router_data):
@@ -43,7 +44,7 @@ class Statistics:
         
         return 0.0
     
-    def get_min_timestamp(self, router_data):
+    def get_min_router_timestamp(self, router_data):
         min_timestamp_ms = None
         for router_name, interfaces in router_data.items():
             for interface_name, data in interfaces.items():

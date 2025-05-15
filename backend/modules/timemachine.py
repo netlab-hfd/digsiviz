@@ -74,12 +74,12 @@ class TimeMachine():
         while True:
             try:
                 if not self.time_machine_state['active'] and self.time_machine_state['timestamp'] is None:
-                    cycle_starttime = time.time()
-                    poll_duration, (current_timestamp, response) = self.time_machine(self.gnmimode)
+                    datapolling_cycle_starttime = time.time()
+                    gnmi_polling_duration, (current_timestamp, response) = self.time_machine(self.gnmimode)
                     available_timestamps = [entry[0] for entry in self.time_machine_deque]
                     self.socketio.emit('router_data', {'value': json.dumps(response)})
                     self.socketio.emit('available_timestamps', {'values': available_timestamps})
-                    self.stats.send_statistics(current_timestamp,response, cycle_starttime, poll_duration)
+                    self.stats.send_statistics(current_timestamp,response, datapolling_cycle_starttime, gnmi_polling_duration)
                     self.time_machine_deque_copy = copy.deepcopy(self.time_machine_deque)
 
                 else:
