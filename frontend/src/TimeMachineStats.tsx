@@ -16,12 +16,22 @@ const TimeMachineStats: React.FC = () => {
     const [pollDuration, setPollDuration] = useState<number | null>(null);
     const [history, setHistory] = useState<number[]>([]);
 
+
+    const formatTimestamp = (timestampMs: number | null) => {
+        if (!timestampMs) return "–";
+        const date = new Date(timestampMs);
+        const timeStr = date.toLocaleTimeString();
+        const ms = date.getMilliseconds().toString().padStart(3, "0");
+        return `${timeStr}.${ms}`;
+    };
+
+
     useEffect(() => {
         socket.on("timemachine_stats", (data) => {
             const now = Date.now()
             setFrontendTimestamp(now);
-            if (data?.deviation !== undefined) {
-                const deviation = data.deviation;
+            if (data?.deviation_ms !== undefined) {
+                const deviation = data.deviation_ms;
                 setStdDeviation(deviation);
 
                 setHistory(prev => {
@@ -30,26 +40,26 @@ const TimeMachineStats: React.FC = () => {
                 });
             }
 
-            if (data?.min_timestamp !== undefined) {
-                const minTs = data.min_timestamp
+            if (data?.min_timestamp_ms !== undefined) {
+                const minTs = data.min_timestamp_ms
                 setMinTimestamp(minTs);
-                const minRouterToRenderDifference = now - (minTs/1e6)
+                const minRouterToRenderDifference = now - minTs
                 setTimeStampDiff(minRouterToRenderDifference);
 
 
             }
 
 
-            if(data?.cycle_starttime != undefined){
-                const cycleStartTime = data.cycle_starttime;
+            if(data?.cycle_starttime_ms != undefined){
+                const cycleStartTime = data.cycle_starttime_ms;
                 setCycleStartTime(cycleStartTime);
-                const cycleStartToRenderDifference = now - (cycleStartTime * 1000);
+                const cycleStartToRenderDifference = now - cycleStartTime;
                 setCycleStartToRenderDifference(cycleStartToRenderDifference);
 
             }
 
-            if (data?.general_timestamp !== undefined) {
-                const backendTs = data.general_timestamp;
+            if (data?.general_timestamp_ms !== undefined) {
+                const backendTs = data.general_timestamp_ms;
                 setBackendTimestamp(backendTs);
             }
 
@@ -58,8 +68,8 @@ const TimeMachineStats: React.FC = () => {
                 setBackendCycleDuration(backendCycleDuration);
             }
 
-            if(data?.poll_duration != undefined){
-                const pollDuration = data.poll_duration;
+            if(data?.poll_duration_ms != undefined){
+                const pollDuration = data.poll_duration_ms;
                 setPollDuration(pollDuration);
             }
 
@@ -98,23 +108,23 @@ const TimeMachineStats: React.FC = () => {
 
             <div className="font-semibold mt-3 mb-1 text-center">Min Router Timestamp</div>
             <div className="text-center text-xs">
-                {minTimestamp}
+                {formatTimestamp(minTimestamp)}
             </div>
 
             <div className="font-bold text-xl mt-3 mb-1 text-center text-decoration-underline">Backend Values</div>
             <div className="font-semibold mt-3 mb-1 text-center">Polling Cycle Start Time</div>
             <div className="text-center text-xs">
-                {cycleStartTime}
+                {formatTimestamp(cycleStartTime)}
             </div>
 
-            <div className="font-semibold mt-3 mb-1 text-center">gNMI General Timestamp</div>
+            <div className="font-semibold mt-3 mb-1 text-center">gNMI General (End) Timestamp</div>
             <div className="text-center text-xs">
-                {backendTimestamp}
+                {formatTimestamp(backendTimestamp)}
             </div>
 
             <div className="font-semibold mt-3 mb-1 text-center">gNMI Poll Duration</div>
             <div className="text-center text-xs">
-                {pollDuration} s
+                {pollDuration} ms
             </div>
 
             <div className="font-semibold mt-3 mb-1 text-center">Backend Cycle Duration</div>
@@ -127,7 +137,7 @@ const TimeMachineStats: React.FC = () => {
 
             <div className="font-semibold mt-3 mb-1 text-center">Current Frontend Timestamp</div>
             <div className="text-center text-xs">
-                {frontendTimestamp}
+                {formatTimestamp(frontendTimestamp)}
             </div>
 
 
