@@ -11,8 +11,7 @@ class TimeMachine():
     """
     Stores gNMI data that were fetched by GnmiClient object
     """
-
-    time_machine_deque = deque(maxlen=120)
+    time_machine_deque = deque(maxlen=1)  
     time_machine_lock = threading.Lock()
     time_machine_state = {
     'timestamp': None,
@@ -33,13 +32,13 @@ class TimeMachine():
         Uses GnmiClient to retrieve data and stores it with an unique time stamp to a deque. Returns the last value of the deque (current value).
         """
         with self.time_machine_lock:
-            start_time = time.time()
+            timestamp_utc = time.time()
 
             if(mode == Gnmi_Mode.GET_SERIAL):
-                data = self.gnmiclient.get_structured_data_serial()
+                data = self.gnmiclient.get_structured_data_serial(timestamp_utc)
 
             if(mode == Gnmi_Mode.GET_PARALLEL):
-                data = self.gnmiclient.get_structured_data_parallel()
+                data = self.gnmiclient.get_structured_data_parallel(timestamp_utc)
 
             if(mode == Gnmi_Mode.SUBSCRIBE_ON_CHANGE):
                 if self.gnmiclient.subscription_data is None:
@@ -48,14 +47,14 @@ class TimeMachine():
                 data = self.gnmiclient.subscription_data
 
 
-            timestamp_utc = time.time()
+
 
             if (mode == Gnmi_Mode.SUBSCRIBE_ON_CHANGE):
                 self.time_machine_deque.append((timestamp_utc, copy.deepcopy(data)))
             else:
                 self.time_machine_deque.append((timestamp_utc, data))
 
-            elapsed_time = time.time() - start_time
+            elapsed_time = time.time() - timestamp_utc
             sleep_time = max(0.5 - elapsed_time, 0)
 
             print(f"(TOTAL)Elapsed time fetching gNMI data: {elapsed_time} seconds")

@@ -33,6 +33,42 @@ services:
       KAFKA_DELETE_TOPIC_ENABLE: "true"
       KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS: 120000
 
+
+  influxdb:
+    image: influxdb:latest
+    container_name: influxdb
+    ports:
+      - 8086:8086
+    networks:
+      - kafka_network
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: user
+      DOCKER_INFLUXDB_INIT_PASSWORD: password
+      DOCKER_INFLUXDB_INIT_ORG: myorg
+      DOCKER_INFLUXDB_INIT_BUCKET: infldb
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: mytoken
+
+  telegraf:
+    image: telegraf:latest
+    container_name: telegraf
+    depends_on:
+      - influxdb
+      - kafka
+    ports:
+      - 8125:8125/udp
+    networks:
+      - kafka_network
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+
+    environment:
+      HOSTNAME: telegraf
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_DB: infldb
+      INFLUXDB_USER: user
+      INFLUXDB_USER_PASSWORD: password
+
 networks:
   kafka_network:
     name: kafka_docker_net
