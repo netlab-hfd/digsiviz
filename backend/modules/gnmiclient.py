@@ -14,7 +14,7 @@ class GnmiClient():
     """
     Helper class to utilize pygnmi library to fetch gNMI data from routers of the topology using different methods and return it in a structured way.
     """
-    
+
     username = "admin"
     password = "NokiaSrl1!"
     port = 57401
@@ -47,7 +47,7 @@ class GnmiClient():
 
     #     gnmi_defaults = {"username": self.username, "password": self.password, "port": self.port}
     #     connected_interfaces = self.yaml.get_interfaces_by_name(hostname)
-        
+
     #     gnmi_paths = [f"/interface[name={interface}]" for interface in connected_interfaces]
     #     target = (ip, gnmi_defaults["port"])
     #     credentials = (gnmi_defaults["username"], gnmi_defaults["password"])
@@ -87,19 +87,19 @@ class GnmiClient():
     #         json_flat = flatten(json_data, separator='.')
 
     #         json_string = json.dumps(json_flat, indent=None)
-            
+
 
     #         self.kafka.send_message("gnmi_data", hostname, json_string)
-            
 
 
-            
+
+
     #         return hostname, router_interfaces
 
     #     except Exception as e:
     #         print(f"Error at {hostname} ({ip}): {e}")
     #         return hostname, None
-        
+
 
     def fetch_router_data(self, hostname, ip, timestamp_utc):
         """
@@ -109,7 +109,7 @@ class GnmiClient():
 
         gnmi_defaults = {"username": self.username, "password": self.password, "port": self.port}
         connected_interfaces = self.yaml.get_interfaces_by_name(hostname)
-        
+
         gnmi_paths = [f"/interface[name={interface}]" for interface in connected_interfaces]
         target = (ip, gnmi_defaults["port"])
         credentials = (gnmi_defaults["username"], gnmi_defaults["password"])
@@ -135,9 +135,9 @@ class GnmiClient():
 
                         converted_json_obj = self.convert_numbers(json_flat)
 
-                        #converted_json= json.dumps(converted_json_obj, indent=None)
+                        converted_json= json.dumps(converted_json_obj, indent=None)
 
-                        
+
 
 
                         json_data= {
@@ -146,12 +146,16 @@ class GnmiClient():
                             "ip": ip,
                             "interface_name": interface_name,
                             "interface_timestamp": timestamp,
-                            "interface_data": converted_json_obj
                         }
-                        
+
+                        json_data.update(converted_json_obj)
+
+
 
                         json_string = json.dumps(json_data, indent=None)
-            
+
+
+
                         self.kafka.send_message("gnmi_data", hostname, json_string)
 
 
@@ -163,9 +167,9 @@ class GnmiClient():
         except Exception as e:
             print(f"Error at {hostname} ({ip}): {e}")
             return hostname, None
-        
 
-        
+
+
     def get_structured_data_serial(self, timestamp_utc):
         """
         Runs the gNMI GET command for each router in the topology in serial.
@@ -175,9 +179,9 @@ class GnmiClient():
         for hostname, ip in self.router_ips.items():
             hostname, data = self.fetch_router_data(hostname, ip, timestamp_utc)
             routers_data[hostname] = data
-        
+
         return routers_data
-    
+
 
     def get_structured_data_parallel(self, timestamp_utc):
         """
@@ -191,9 +195,9 @@ class GnmiClient():
 
         for hostname, data in results:
             routers_data[hostname] = data
-        
+
         return routers_data
-    
+
 
 
     def subscribe_gnmi_data(self):
@@ -284,7 +288,7 @@ class GnmiClient():
             thread = threading.Thread(target=handle_updates, args=(hostname, ip), daemon=True)
             thread.start()
 
- 
+
 
     def convert_numbers(self,obj):
         if isinstance(obj, dict):
