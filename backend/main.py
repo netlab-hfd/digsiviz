@@ -6,6 +6,7 @@ from modules.yamlinterpreter import YamlInterpreter
 from modules.clabassistant import ClabAssistant
 from modules.gnmiclient import GnmiClient
 from modules.timemachine import TimeMachine
+import threading
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -18,6 +19,8 @@ timemachine = TimeMachine(socketio=socketio, gnmiclient=gnmiclient)
 
 topology = yamlinterpreter.topology_graph
 
+
+threading.Thread(target=timemachine.get_router_values, daemon=True).start()
 
 
 @app.route("/topology", methods=["GET"])

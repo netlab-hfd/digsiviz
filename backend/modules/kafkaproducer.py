@@ -1,7 +1,7 @@
 from confluent_kafka import Producer, admin, KafkaError, KafkaException
 
 
-class KafkaConnector:
+class KafkaProducer:
     def __init__(self, bootstrap_servers: str):
         self.bootstrap_servers = bootstrap_servers
         self.producer = Producer({

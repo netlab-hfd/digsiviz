@@ -1,7 +1,7 @@
 from pygnmi.client import gNMIclient
 from modules.yamlinterpreter import YamlInterpreter
 from modules.clabassistant import ClabAssistant
-from modules.kafkaconnector import KafkaConnector
+from modules.kafkaproducer import KafkaProducer
 import re
 import time
 import concurrent.futures
@@ -9,12 +9,13 @@ import threading
 from datetime import datetime, timezone
 import json
 from flatten_json import flatten
+from flask_socketio import SocketIO
+from modules.statistics import Statistics
 
 class GnmiClient():
     """
     Helper class to utilize pygnmi library to fetch gNMI data from routers of the topology using different methods and return it in a structured way.
     """
-
     username = "admin"
     password = "NokiaSrl1!"
     port = 57401
@@ -26,7 +27,7 @@ class GnmiClient():
     subscription_lock = None
 
 
-    def __init__(self, yamlinterpreter: YamlInterpreter, clabassistant: ClabAssistant,  username = "admin", password = "NokiaSrl1!", port = 57401):
+    def __init__(self, yamlinterpreter: YamlInterpreter, clabassistant: ClabAssistant, username = "admin", password = "NokiaSrl1!", port = 57401):
         super().__init__()
         self.username = username
         self.password = password
@@ -34,74 +35,15 @@ class GnmiClient():
         self.yaml = yamlinterpreter
         self.clab = clabassistant
         self.router_ips = self.clab.get_clab_router_ips()
-        self.kafka = KafkaConnector("localhost:29092")
+        self.kafka = KafkaProducer("localhost:29092")
         if self.kafka.check_topic_exists("gnmi_data") is False:
             self.kafka.create_topic("gnmi_data", 1, 1)
 
+        self.statistics = Statistics()
 
-    # def fetch_router_data(self, hostname, ip, timestamp_utc):
-    #     """
-    #     Fetches router data of a certain hostname and router IP using the gNMI GET command. Returns hostname and the gNMI data sorted by interfaces.
-    #     """
-    #     start_time = time.time()
+        
 
-    #     gnmi_defaults = {"username": self.username, "password": self.password, "port": self.port}
-    #     connected_interfaces = self.yaml.get_interfaces_by_name(hostname)
-
-    #     gnmi_paths = [f"/interface[name={interface}]" for interface in connected_interfaces]
-    #     target = (ip, gnmi_defaults["port"])
-    #     credentials = (gnmi_defaults["username"], gnmi_defaults["password"])
-
-    #     try:
-    #         with gNMIclient(target=target, username=credentials[0], password=credentials[1], insecure=True) as gnmi:
-    #             response = gnmi.get(path=gnmi_paths, encoding="json_ietf")
-
-
-    #         router_interfaces = {}
-    #         if "notification" in response:
-    #             for notif in response["notification"]:
-    #                 timestamp = notif.get("timestamp", None)
-    #                 for update in notif.get("update", []):
-    #                     path_str = update["path"]
-    #                     match = re.search(r"interface\[name=(.*?)\]", path_str)
-    #                     interface_name = match.group(1) if match else "unknown"
-    #                     value = update["val"]
-
-    #                     if interface_name not in router_interfaces:
-    #                         router_interfaces[interface_name] = {}
-
-    #                     router_interfaces[interface_name]["timestamp"] = timestamp
-    #                     router_interfaces[interface_name].update(value)
-
-
-    #         elapsed_time = time.time() - start_time
-    #         print(f"(Router {hostname}) Elapsed time for fetching gNMI data: {elapsed_time} seconds")
-
-    #         json_data= {
-    #             "timestamp": datetime.fromtimestamp(timestamp_utc, tz=timezone.utc).isoformat(),
-    #             "hostname": hostname,
-    #             "ip": ip,
-    #             "interfaces": router_interfaces
-    #         }
-
-    #         json_flat = flatten(json_data, separator='.')
-
-    #         json_string = json.dumps(json_flat, indent=None)
-
-
-    #         self.kafka.send_message("gnmi_data", hostname, json_string)
-
-
-
-
-    #         return hostname, router_interfaces
-
-    #     except Exception as e:
-    #         print(f"Error at {hostname} ({ip}): {e}")
-    #         return hostname, None
-
-
-    def fetch_router_data(self, hostname, ip, timestamp_utc):
+    def fetch_router_data(self, hostname, ip, timestamp_iso):
         """
         Fetches router data of a certain hostname and router IP using the gNMI GET command. Returns hostname and the gNMI data sorted by interfaces.
         """
@@ -109,7 +51,7 @@ class GnmiClient():
 
         gnmi_defaults = {"username": self.username, "password": self.password, "port": self.port}
         connected_interfaces = self.yaml.get_interfaces_by_name(hostname)
-
+        
         gnmi_paths = [f"/interface[name={interface}]" for interface in connected_interfaces]
         target = (ip, gnmi_defaults["port"])
         credentials = (gnmi_defaults["username"], gnmi_defaults["password"])
@@ -118,10 +60,11 @@ class GnmiClient():
             with gNMIclient(target=target, username=credentials[0], password=credentials[1], insecure=True) as gnmi:
                 response = gnmi.get(path=gnmi_paths, encoding="json_ietf")
 
-
+            collected_timestamps = []
             if "notification" in response:
                 for notif in response["notification"]:
                     timestamp = notif.get("timestamp", None)
+                    collected_timestamps.append(timestamp)
                     for update in notif.get("update", []):
                         path_str = update["path"]
                         match = re.search(r"interface\[name=(.*?)\]", path_str)
@@ -138,38 +81,40 @@ class GnmiClient():
                         converted_json= json.dumps(converted_json_obj, indent=None)
 
 
-
-
                         json_data= {
-                            "timestamp": datetime.fromtimestamp(timestamp_utc, tz=timezone.utc).isoformat(),
+                            "timestamp": timestamp_iso,
                             "hostname": hostname,
                             "ip": ip,
                             "interface_name": interface_name,
-                            "interface_timestamp": timestamp,
+                            "interface_timestamp": timestamp,                            
                         }
 
                         json_data.update(converted_json_obj)
-
-
+                        
+                        
 
                         json_string = json.dumps(json_data, indent=None)
 
 
-
+            
                         self.kafka.send_message("gnmi_data", hostname, json_string)
 
 
             elapsed_time = time.time() - start_time
-            print(f"(Router {hostname}) Elapsed time for fetching gNMI data: {elapsed_time} seconds")
 
-            return hostname, None # TODO: New Return
+            stats = self.statistics.calc_statistics(hostname, timestamp_iso, collected_timestamps, elapsed_time)
+            self.kafka.send_message("gnmi_stats", hostname, json.dumps(stats, indent=None))
+
+            #print(f"(Router {hostname}) Elapsed time for fetching gNMI data: {elapsed_time} seconds")
+
+            return hostname, collected_timestamps # TODO: New Return
 
         except Exception as e:
             print(f"Error at {hostname} ({ip}): {e}")
             return hostname, None
+        
 
-
-
+        
     def get_structured_data_serial(self, timestamp_utc):
         """
         Runs the gNMI GET command for each router in the topology in serial.
@@ -179,25 +124,34 @@ class GnmiClient():
         for hostname, ip in self.router_ips.items():
             hostname, data = self.fetch_router_data(hostname, ip, timestamp_utc)
             routers_data[hostname] = data
-
+        
         return routers_data
-
+    
 
     def get_structured_data_parallel(self, timestamp_utc):
         """
         Runs the gNMI GET command for each router in the topology in parallel.
         """
-        routers_data = {}
+        start_time = time.time()
+        timestamp_iso = datetime.fromtimestamp(timestamp_utc, tz=timezone.utc).isoformat()
+        routers_data = {} #TODO: routers data still useful??
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            results = executor.map(lambda args: self.fetch_router_data(args[0], args[1], timestamp_utc), self.router_ips.items())
+            results = executor.map(lambda args: self.fetch_router_data(args[0], args[1], timestamp_iso), self.router_ips.items())
+
+        elapsed_time = time.time() - start_time
+
+        collected_global_timestamps = []
+        for hostname, timestamps in results:
+            if timestamps is not None:
+                collected_global_timestamps.extend(timestamps)
 
 
-        for hostname, data in results:
-            routers_data[hostname] = data
-
-        return routers_data
-
+        global_stats = self.statistics.calc_statistics("global", timestamp_iso, collected_global_timestamps, elapsed_time)
+        self.kafka.send_message("gnmi_stats", "global", json.dumps(global_stats, indent=None))
+        
+        return routers_data #TODO: remove....
+    
 
 
     def subscribe_gnmi_data(self):
@@ -288,7 +242,7 @@ class GnmiClient():
             thread = threading.Thread(target=handle_updates, args=(hostname, ip), daemon=True)
             thread.start()
 
-
+ 
 
     def convert_numbers(self,obj):
         if isinstance(obj, dict):
@@ -296,7 +250,6 @@ class GnmiClient():
         elif isinstance(obj, list):
             return [self.convert_numbers(elem) for elem in obj]
         elif isinstance(obj, str):
-            # Versuch int, dann float
             try:
                 return int(obj)
             except ValueError:

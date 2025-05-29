@@ -57,8 +57,8 @@ class TimeMachine():
             elapsed_time = time.time() - timestamp_utc
             sleep_time = max(0.5 - elapsed_time, 0)
 
-            print(f"(TOTAL)Elapsed time fetching gNMI data: {elapsed_time} seconds")
-            print(f"(TOTAL)Sleeping for: {sleep_time} seconds")
+            #print(f"(TOTAL)Elapsed time fetching gNMI data: {elapsed_time} seconds")
+            #print(f"(TOTAL)Sleeping for: {sleep_time} seconds")
 
             time.sleep(sleep_time)
 
@@ -73,8 +73,8 @@ class TimeMachine():
                 if not self.time_machine_state['active'] and self.time_machine_state['timestamp'] is None:
                     current_timestamp, response = self.time_machine(self.gnmimode)
                     available_timestamps = [entry[0] for entry in self.time_machine_deque]
-                    self.socketio.emit('router_data', {'value': json.dumps(response)})
-                    self.socketio.emit('available_timestamps', {'values': available_timestamps})
+                    #self.socketio.emit('router_data', {'value': json.dumps(response)})
+                    #self.socketio.emit('available_timestamps', {'values': available_timestamps})
                     self.time_machine_deque_copy = copy.deepcopy(self.time_machine_deque)
 
                 else:
