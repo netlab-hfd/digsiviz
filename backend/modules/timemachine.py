@@ -13,7 +13,7 @@ class TimeMachine():
     Stores gNMI data that were fetched by GnmiClient object
     """
 
-    time_machine_deque = deque(maxlen=120)
+    time_machine_deque = deque(maxlen=1)
     time_machine_lock = threading.Lock()
     time_machine_state = {
     'timestamp': None,

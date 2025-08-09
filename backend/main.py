@@ -11,7 +11,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-yamlinterpreter = YamlInterpreter(filepath="ma-fp-stumpf.clab.yml")
+yamlinterpreter = YamlInterpreter(filepath="ibr.clab.yml")
 clabassistant = ClabAssistant()
 gnmiclient = GnmiClient(yamlinterpreter=yamlinterpreter, clabassistant=clabassistant)
 timemachine = TimeMachine(socketio=socketio, gnmiclient=gnmiclient)

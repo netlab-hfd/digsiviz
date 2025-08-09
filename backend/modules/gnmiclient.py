@@ -22,11 +22,11 @@ class GnmiClient():
     subscription_lock = None
 
 
-    def __init__(self, yamlinterpreter: YamlInterpreter, clabassistant: ClabAssistant,  username = "admin", password = "NokiaSrl1!", port = 57401):
+    def __init__(self, yamlinterpreter: YamlInterpreter, clabassistant: ClabAssistant,  username = "admin", password = "admsdsdin", port = 7030):
         super().__init__()
         self.username = username
         self.password = password
-        self.port = 57401
+        self.port = port
         self.yaml = yamlinterpreter
         self.clab = clabassistant
         self.router_ips = self.clab.get_clab_router_ips()
@@ -37,17 +37,20 @@ class GnmiClient():
         Fetches router data of a certain hostname and router IP using the gNMI GET command. Returns hostname and the gNMI data sorted by interfaces.
         """
         start_time = time.time()
+    
 
         gnmi_defaults = {"username": self.username, "password": self.password, "port": self.port}
         connected_interfaces = self.yaml.get_interfaces_by_name(hostname)
         
-        gnmi_paths = [f"/interface[name={interface}]" for interface in connected_interfaces]
+        gnmi_paths = [f"/interfaces/interface[name={interface}]" for interface in connected_interfaces]
+        #gnmi_paths = [f"/" for i in range(0,1)]
         target = (ip, gnmi_defaults["port"])
         credentials = (gnmi_defaults["username"], gnmi_defaults["password"])
 
         try:
             with gNMIclient(target=target, username=credentials[0], password=credentials[1], insecure=True) as gnmi:
                 response = gnmi.get(path=gnmi_paths, encoding="json_ietf")
+                print(f"Router response:",response)
 
 
             router_interfaces = {}
@@ -85,9 +88,11 @@ class GnmiClient():
         """
         routers_data = {}
 
+
         for hostname, ip in self.router_ips.items():
             hostname, data = self.fetch_router_data(hostname, ip)
             routers_data[hostname] = data
+            print(f"Fetched data for {hostname}: {data}")
         
         return routers_data
     
@@ -103,6 +108,7 @@ class GnmiClient():
 
         for hostname, data in results:
             routers_data[hostname] = data
+            print(f"Fetched data for {hostname}: {data}")
         
         return routers_data
     

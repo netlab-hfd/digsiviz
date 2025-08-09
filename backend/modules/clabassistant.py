@@ -49,6 +49,8 @@ class ClabAssistant():
                     hostname = name_split[-1]
                     ip_clean = ipv4_address.split("/")[0] if (ipv4_address and group == "routers") else None
 
+                    print(f"Found container {hostname} with IP {ipv4_address} / {ip_clean} and group {group}")
+
                     if ip_clean:
                         container_ips[hostname] = ip_clean
 

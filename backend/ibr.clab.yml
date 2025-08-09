@@ -1,0 +1,146 @@
+# From github.com/netlab-hfd/ibr-testbed
+name: ibr
+
+topology:
+  nodes:
+    # Routers
+    r1:
+      kind: linux
+      #image: quay.io/frrouting/frr:10.3.1
+      #image: frr-gnmi-target:latest
+      image: flex/frr-gnmi-target:latest
+      group: routers
+      binds:
+        - r1/daemons:/etc/frr/daemons
+        - r1/frr.conf:/etc/frr/frr.conf
+      labels:
+        graph-posX: "685"
+        graph-posY: "545"
+        graph-groupLabelPos: bottom-center
+    r2:
+      kind: linux
+      #image: quay.io/frrouting/frr:10.3.1
+      #image: frr-gnmi-target:latest
+      image: flex/frr-gnmi-target:latest
+      group: routers
+      binds:
+        - r2/daemons:/etc/frr/daemons
+        - r2/frr.conf:/etc/frr/frr.conf
+      labels:
+        graph-posX: "715"
+        graph-posY: "585"
+        graph-groupLabelPos: bottom-center
+    r3:
+      kind: linux
+      #image: quay.io/frrouting/frr:10.3.1
+      #image: frr-gnmi-target:latest
+      image: flex/frr-gnmi-target:latest
+      group: routers
+      binds:
+        - r3/daemons:/etc/frr/daemons
+        - r3/frr.conf:/etc/frr/frr.conf
+      labels:
+        graph-posX: "755"
+        graph-posY: "545"
+        graph-groupLabelPos: bottom-center
+    r4:
+      kind: linux
+      #image: quay.io/frrouting/frr:10.3.1
+      #image: frr-gnmi-target:latest
+      image: flex/frr-gnmi-target:latest
+      group: routers
+      binds:
+        - r4/daemons:/etc/frr/daemons
+        - r4/frr.conf:/etc/frr/frr.conf
+      labels:
+        graph-posX: "685"
+        graph-posY: "475"
+        graph-groupLabelPos: bottom-center
+    r5:
+      kind: linux
+      #image: quay.io/frrouting/frr:10.3.1
+      #image: frr-gnmi-target:latest
+      image: flex/frr-gnmi-target:latest
+      group: routers
+      binds:
+        - r5/daemons:/etc/frr/daemons
+        - r5/frr.conf:/etc/frr/frr.conf
+      labels:
+        graph-posX: "755"
+        graph-posY: "475"
+        graph-groupLabelPos: bottom-center
+    # Switches
+    #s1:
+    #  kind: ovs-bridge
+    #s2:
+    #  kind: ovs-bridge
+    #s3:
+    #  kind: ovs-bridge
+    # Hosts
+    h1-1:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool
+      exec:
+        - ip addr add 192.168.11.101/24 dev eth1
+        - ip route del default
+        - ip route add default via 192.168.11.1
+      labels:
+        graph-posX: "605"
+        graph-posY: "545"
+        graph-groupLabelPos: bottom-center
+    #h1-2:
+    #  kind: linux
+    #  image: ghcr.io/hellt/network-multitool
+    #  exec:
+    #    - ip addr add 192.168.11.102/24 dev eth1
+    #    - ip route del default
+    #    - ip route add default via 192.168.11.1
+    h2-1:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool
+      exec:
+        - ip addr add 192.168.12.101/24 dev eth1
+        - ip route del default
+        - ip route add default via 192.168.12.1
+      labels:
+        graph-posX: "715"
+        graph-posY: "665"
+        graph-groupLabelPos: bottom-center
+    h3-1:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool
+      exec:
+        - ip addr add 192.168.13.101/24 dev eth1
+        - ip route del default
+        - ip route add default via 192.168.13.1
+      labels:
+        graph-posX: "835"
+        graph-posY: "545"
+        graph-groupLabelPos: bottom-center
+    #h3-2:
+    #  kind: linux
+    #  image: ghcr.io/hellt/network-multitool
+
+  links:
+    - endpoints: [ r1:eth1, r2:eth1 ]
+    - endpoints: [ r1:eth2, r3:eth1 ]
+    - endpoints: [ r1:eth3, r4:eth1 ]
+    - endpoints: [ r1:eth4, r4:eth2 ]
+    - endpoints: [ r2:eth2, r3:eth2 ]
+    - endpoints: [ r4:eth3, r5:eth1 ]
+    - endpoints: [ r4:eth4, r5:eth2 ]
+    - endpoints: [ r5:eth3, r3:eth3 ]
+    - endpoints: [ r5:eth4, r3:eth4 ]
+    #- endpoints: [ s1:eth1, r1:eth5 ]
+    #- endpoints: [ s2:eth1, r2:eth3 ]
+    #- endpoints: [ s3:eth1, r3:eth5 ]
+    #- endpoints: [ h1-1:eth1, s1:eth2 ]
+    #- endpoints: [ h1-2:eth1, s1:eth3 ]
+    #- endpoints: [ h2-1:eth1, s2:eth2 ]
+    #- endpoints: [ h3-1:eth1, s3:eth2 ]
+    #- endpoints: [ h3-2:eth1, s3:eth3 ]
+    - endpoints: [ h1-1:eth1, r1:eth5 ]
+    #- endpoints: [ h1-2:eth1, r1:eth6 ]
+    - endpoints: [ h2-1:eth1, r2:eth3 ]
+    - endpoints: [ h3-1:eth1, r3:eth5 ]
+    #- endpoints: [ h3-2:eth1, r3:eth6 ]
