@@ -5,6 +5,7 @@ import "./index.css";
 import io from 'socket.io-client';
 import TimeMachine from "./TimeMachine.tsx";
 import TimeMachineStats from "./TimeMachineStats.tsx";
+import CounterVisualization from "./CounterVisualization.tsx";
 
 interface Node {
     id: string;
@@ -235,6 +236,7 @@ const TopologyVisualization: React.FC = () => {
 
     return (
         <div className="flex flex-col h-full w-screen">
+            <CounterVisualization routerData={routerData} selectedNode={selectedNode} selectedLink={selectedLink} />
             <TimeMachineStats/>
             <div className="container-fluid d-flex p-0 h-screen">
                 <div className="row flex-grow-1 m-0 h-full">
