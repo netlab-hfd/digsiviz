@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from "react";
 import {ForceGraph2D} from "react-force-graph";
-import {forceCollide, forceLink, forceManyBody} from 'd3';
+import {forceCollide, forceLink, forceManyBody, forceSimulation} from 'd3';
 import "./index.css";
 import io from 'socket.io-client';
 import TimeMachine from "./TimeMachine.tsx";
@@ -36,7 +36,6 @@ const TopologyVisualization: React.FC = () => {
     const [filter, setFilter] = useState<string>("all");
     const fgRef = useRef<any>(null);
 
-
     const imageCache = useRef<{ [key: string]: HTMLImageElement }>({});
 
     const getImage = (type: string) => {
@@ -52,6 +51,30 @@ const TopologyVisualization: React.FC = () => {
     };
 
 
+    const getParallelLinkOffset = (link: any, allLinks: any[]) => {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+        const parallelLinks = allLinks.filter(l => {
+            const lSourceId = typeof l.source === 'object' ? l.source.id : l.source;
+            const lTargetId = typeof l.target === 'object' ? l.target.id : l.target;
+
+            return (lSourceId === sourceId && lTargetId === targetId) ||
+                (lSourceId === targetId && lTargetId === sourceId);
+        });
+
+        if (parallelLinks.length <= 1) return 0;
+
+        const currentIndex = parallelLinks.findIndex(l => l === link);
+
+
+        const totalLinks = parallelLinks.length;
+        const offsetStep = 25;
+
+
+        return (currentIndex - (totalLinks - 1) / 2) * offsetStep;
+    };
+
     useEffect(() => {
         socket.on('router_data', (data: { value: string }) => {
             try {
@@ -66,7 +89,6 @@ const TopologyVisualization: React.FC = () => {
             socket.off('router_data');
         };
     }, []);
-
 
     useEffect(() => {
         fetch("http://127.0.0.1:5000/topology", {headers: {'Access-Control-Allow-Origin': '*'}})
@@ -84,7 +106,7 @@ const TopologyVisualization: React.FC = () => {
             fgRef.current.zoom(2);
             fgRef.current.centerAt(0, 0);
         }, 300);
-    }, []);
+    }, [graphData]);
 
     const handleNodeClick = (node: any) => {
         setSelectedNode(node.id);
@@ -174,7 +196,6 @@ const TopologyVisualization: React.FC = () => {
             return {"Keine Daten gefunden für Filter": ""};
         };
 
-
         if (selectedNode) {
             console.log("Node geklickt:", selectedNode);
             const nodeData = routerData[selectedNode];
@@ -233,38 +254,64 @@ const TopologyVisualization: React.FC = () => {
         return <p>Wähle einen Node oder Link aus.</p>;
     };
 
-
     return (
         <div className="flex flex-col h-full w-screen">
-            <CounterVisualization routerData={routerData} selectedNode={selectedNode} selectedLink={selectedLink} />
+            {
+                selectedNode ?
+                    <div>
+                        <CounterVisualization routerData={routerData} selectedNode={"r1"}
+                                              selectedLink={selectedLink}/>
+                        <CounterVisualization routerData={routerData} selectedNode={"r2"}
+                                              selectedLink={selectedLink}/>
+                        <CounterVisualization routerData={routerData} selectedNode={"r3"}
+                                              selectedLink={selectedLink}/>
+                        <CounterVisualization routerData={routerData} selectedNode={"r4"}
+                                              selectedLink={selectedLink}/>
+                        <CounterVisualization routerData={routerData} selectedNode={"r5"}
+                                              selectedLink={selectedLink}/>
+                    </div>
+                    : <div/>
+            }
+
+            {
+                selectedLink ?
+                    <div>
+                        <CounterVisualization routerData={routerData} selectedNode={selectedLink.source.id}
+                                              selectedLink={selectedLink}/>
+                        <CounterVisualization routerData={routerData} selectedNode={selectedLink.target.id}
+                                              selectedLink={selectedLink}/>
+                    </div> : <div/>
+            }
+
             <TimeMachineStats/>
             <div className="container-fluid d-flex p-0 h-screen">
                 <div className="row flex-grow-1 m-0 h-full">
                     {/* Linke Spalte (Echtzeit-Infos)*/}
                     <div className="col-4  overflow-hidden bg-light h-full">
                         <TimeMachine/>
-                    <div className="p-2 overflow-auto bg-light h-full" >
-                        <h1>
-                            {selectedNode
-                                ? selectedNode
-                                : selectedLink
-                                    ? `${selectedLink.source?.id || "???"} <-> ${selectedLink.target?.id || "???"}`
-                                    : ""}
-                        </h1>
+                        <div className="p-2 overflow-auto bg-light h-full">
+                            <h1>
+                                {selectedNode
+                                    ? selectedNode
+                                    : selectedLink
+                                        ? `${selectedLink.source?.id || "???"} <-> ${selectedLink.target?.id || "???"}`
+                                        : ""}
+                            </h1>
 
-                        <label>Filter: </label>
-                        <select className="form-select mb-2" value={filter} onChange={(e) => setFilter(e.target.value)}>
-                            <option value="all">Alle Daten</option>
-                            <option value="statistics">Statistiken</option>
-                            <option value="traffic-rate">Datenrate</option>
-                            <option value="transceiver">Transceiver</option>
-                        </select>
-                        {filteredData()}
-                    </div>
+                            <label>Filter: </label>
+                            <select className="form-select mb-2" value={filter}
+                                    onChange={(e) => setFilter(e.target.value)}>
+                                <option value="all">Alle Daten</option>
+                                <option value="statistics">Statistiken</option>
+                                <option value="traffic-rate">Datenrate</option>
+                                <option value="transceiver">Transceiver</option>
+                            </select>
+                            {filteredData()}
+                        </div>
                     </div>
                     {/* Rechte Spalte (ForceGraph) */}
                     <div className="col-8 p-2 h-screen overflow-hidden">
-                    <ForceGraph2D
+                        <ForceGraph2D
                             width={window.innerWidth * 0.66}
                             height={window.innerHeight * 0.9}
                             ref={fgRef}
@@ -302,22 +349,70 @@ const TopologyVisualization: React.FC = () => {
                                 const source = link.source as { x: number; y: number };
                                 const target = link.target as { x: number; y: number };
 
-                                ctx.beginPath();
-                                ctx.moveTo(source.x, source.y);
-                                ctx.lineTo(target.x, target.y);
-                                ctx.strokeStyle = "lightgray";
-                                ctx.lineWidth = 1;
-                                ctx.stroke();
 
-                                const midX = (source.x + target.x) / 2;
-                                const midY = (source.y + target.y) / 2;
+                                const offset = getParallelLinkOffset(link, graphData.links);
+                                if (offset === 0) {
 
-                                const fontSize = 10 / globalScale;
-                                ctx.font = `${fontSize}px Sans-Serif`;
-                                ctx.fillStyle = "blue";
-                                ctx.textAlign = "center";
-                                ctx.textBaseline = "middle";
-                                ctx.fillText(`${link.source_interface} -> ${link.target_interface}`, midX, midY);
+                                    ctx.beginPath();
+                                    ctx.moveTo(source.x, source.y);
+                                    ctx.lineTo(target.x, target.y);
+                                    ctx.strokeStyle = "lightgray";
+                                    ctx.lineWidth = 1;
+                                    ctx.stroke();
+
+                                    const midX = (source.x + target.x) / 2;
+                                    const midY = (source.y + target.y) / 2;
+
+                                    const fontSize = 9 / globalScale;
+                                    ctx.font = `${fontSize}px Sans-Serif`;
+                                    ctx.fillStyle = "blue";
+                                    ctx.textAlign = "center";
+                                    ctx.textBaseline = "middle";
+
+                                    const text = `${link.source_interface} -> ${link.target_interface}`;
+                                    const textWidth = ctx.measureText(text).width;
+                                    ctx.fillStyle = "white";
+                                    ctx.fillRect(midX - textWidth/2 - 2, midY - fontSize/2 - 1, textWidth + 4, fontSize + 2);
+
+                                    ctx.fillStyle = "blue";
+                                    ctx.fillText(text, midX, midY);
+                                } else {
+
+                                    const dx = target.x - source.x;
+                                    const dy = target.y - source.y;
+                                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+
+                                    const normalX = -dy / distance * offset;
+                                    const normalY = dx / distance * offset;
+
+                                    const controlX = (source.x + target.x) / 2 + normalX;
+                                    const controlY = (source.y + target.y) / 2 + normalY;
+
+                                    ctx.beginPath();
+                                    ctx.moveTo(source.x, source.y);
+                                    ctx.quadraticCurveTo(controlX, controlY, target.x, target.y);
+                                    ctx.strokeStyle = "lightgray";
+                                    ctx.lineWidth = 1;
+                                    ctx.stroke();
+
+                                    const midX = (source.x + target.x) / 2 + normalX * 0.7;
+                                    const midY = (source.y + target.y) / 2 + normalY * 0.7;
+
+                                    const fontSize = 9 / globalScale;
+                                    ctx.font = `${fontSize}px Sans-Serif`;
+                                    ctx.fillStyle = "blue";
+                                    ctx.textAlign = "center";
+                                    ctx.textBaseline = "middle";
+
+                                    const text = `${link.source_interface} -> ${link.target_interface}`;
+                                    const textWidth = ctx.measureText(text).width;
+                                    ctx.fillStyle = "white";
+                                    ctx.fillRect(midX - textWidth/2 - 2, midY - fontSize/2 - 1, textWidth + 4, fontSize + 2);
+
+                                    ctx.fillStyle = "blue";
+                                    ctx.fillText(text, midX, midY);
+                                }
                             }}
                             onNodeClick={handleNodeClick}
                             onLinkClick={handleLinkClick}
