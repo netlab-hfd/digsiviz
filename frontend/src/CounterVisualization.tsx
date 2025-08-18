@@ -1,6 +1,5 @@
 import React, {useEffect, useState, useRef} from "react";
-import {Sparklines, SparklinesLine, SparklinesSpots, SparklinesBars} from "react-sparklines";
-import {forEach} from "react-bootstrap/ElementChildren";
+import {Sparklines, SparklinesLine, SparklinesSpots} from "react-sparklines";
 
 interface Link {
     source: string;
@@ -28,17 +27,26 @@ interface Counters {
 
 interface InterfaceData {
     name: string;
-    timestamp?: number;
+    timestamp: number;
     counters: Counters;
+}
+
+interface TrafficRate {
+    inRate: number;
+    outRate: number;
+    inRateMbps: number;
+    outRateMbps: number;
 }
 
 const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, selectedNode, selectedLink}) => {
     const [selectedRouterData, setSelectedRouterData] = React.useState<any>(null);
     const [allInterfaceData, setAllInterfaceData] = React.useState<{ [key: string]: InterfaceData }>({});
     const [interfaceHistories, setInterfaceHistories] = React.useState<{ [key: string]: InterfaceData[] }>({});
+    const [trafficRates, setTrafficRates] = React.useState<{ [key: string]: TrafficRate }>({});
+    const [trafficRateHistories, setTrafficRateHistories] = React.useState<{ [key: string]: TrafficRate[] }>({});
 
     // Drag functionality states
-    const [position, setPosition] = useState({ x: 384, y: 16 }); // Initial position (left-96 = 384px, top-4 = 16px)
+    const [position, setPosition] = useState({ x: 384, y: 16 });
     const [isDragging, setIsDragging] = useState(false);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const dragRef = useRef<HTMLDivElement>(null);
@@ -47,16 +55,20 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
     const [selectedInterfaces, setSelectedInterfaces] = useState<Set<string>>(new Set());
     const [showInterfaceSelector, setShowInterfaceSelector] = useState(false);
 
+
+
     useEffect(() => {
         setAllInterfaceData({});
         setInterfaceHistories({});
+        setTrafficRates({});
+        setTrafficRateHistories({});
         setSelectedRouterData(null);
-        setSelectedInterfaces(new Set()); // Reset interface selection when node changes
+        setSelectedInterfaces(new Set());
     }, [selectedNode]);
 
     useEffect(() => {
         if (routerData != null && selectedNode != null) {
-            console.log("Node selected:", selectedNode);
+            // console.log("Node selected:", selectedNode);
             const currentRouterData = routerData[selectedNode];
             setSelectedRouterData(currentRouterData);
 
@@ -66,7 +78,7 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
                 Object.keys(currentRouterData).forEach((interfaceName) => {
                     const interfaceData = currentRouterData[interfaceName];
                     if (interfaceData && interfaceData["openconfig-interfaces:state"] && interfaceData["openconfig-interfaces:state"]["counters"]) {
-                        console.log(`Interface: ${interfaceName}, Data:`, interfaceData);
+                        // console.log(`Interface: ${interfaceName}, Data:`, interfaceData);
 
                         const newInterfaceData: InterfaceData = {
                             name: interfaceName,
@@ -104,12 +116,79 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
                     setSelectedInterfaces(new Set(Object.keys(newAllInterfaceData)));
                 }
 
-                console.log(newAllInterfaceData)
+                // console.log(newAllInterfaceData);
             }
         }
     }, [routerData, selectedNode, selectedLink, selectedInterfaces]);
 
+    useEffect(() => {
+        const newTrafficRates: { [key: string]: TrafficRate } = {};
 
+        Object.keys(allInterfaceData).forEach((interfaceName) => {
+            const history = interfaceHistories[interfaceName] || [];
+            if (history.length >= 2) {
+                const current = history[history.length - 1];
+                const previous = history[history.length - 2];
+
+                const timeDiffSeconds = (current.timestamp - previous.timestamp) / 1000000000; // Nanoseconds to seconds
+
+               /* console.log(`Interface ${interfaceName}:`);
+                console.log(`  Current timestamp: ${current.timestamp}`);
+                console.log(`  Previous timestamp: ${previous.timestamp}`);
+                console.log(`  Time diff (nanoseconds): ${current.timestamp - previous.timestamp}`);
+                console.log(`  Time diff (seconds): ${timeDiffSeconds}`);
+                console.log(`  Current inOctets: ${current.counters.inOctets}`);
+                console.log(`  Previous inOctets: ${previous.counters.inOctets}`);*/
+
+                if (timeDiffSeconds > 0) {
+                    const inOctetsDiff = Math.max(0, current.counters.inOctets - previous.counters.inOctets);
+                    const outOctetsDiff = Math.max(0, current.counters.outOctets - previous.counters.outOctets);
+
+/*                  console.log(`  inOctets diff: ${inOctetsDiff}`);
+                    console.log(`  outOctets diff: ${outOctetsDiff}`);*/
+
+                    const inRateBps = inOctetsDiff / timeDiffSeconds;
+                    const outRateBps = outOctetsDiff / timeDiffSeconds;
+/*                  console.log(`  inRate B/s: ${inRateBps}`);
+                    console.log(`  outRate B/s: ${outRateBps}`);*/
+
+                    // Convert to Mbps
+                    const inRateMbps = (inRateBps * 8) / 1000000;
+                    const outRateMbps = (outRateBps * 8) / 1000000;
+
+                    // Convert to Gbps
+                    const inRateGbps = inRateMbps / 1000;
+                    const outRateGbps = outRateMbps / 1000;
+
+                    /*console.log(`  inRate Mbps: ${inRateMbps}`);
+                    console.log(`  inRate Gbps: ${inRateGbps}`);*/
+
+                    newTrafficRates[interfaceName] = {
+                        inRate: inRateBps,
+                        outRate: outRateBps,
+                        inRateMbps: inRateMbps,
+                        outRateMbps: outRateMbps
+                    };
+
+                    setTrafficRateHistories(prev => {
+                        const currentRateHistory = prev[interfaceName] || [];
+                        const updatedRateHistory = [...currentRateHistory, newTrafficRates[interfaceName]];
+                        const limitedRateHistory = updatedRateHistory.length > 120 ?
+                            updatedRateHistory.slice(updatedRateHistory.length - 120) : updatedRateHistory;
+
+                        return {
+                            ...prev,
+                            [interfaceName]: limitedRateHistory
+                        };
+                    });
+                }
+            }
+        });
+
+        setTrafficRates(newTrafficRates);
+    }, [interfaceHistories, allInterfaceData]);
+
+    // Drag handlers (unchanged)
     const handleMouseDown = (e: React.MouseEvent) => {
         if (dragRef.current) {
             const rect = dragRef.current.getBoundingClientRect();
@@ -126,7 +205,6 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
             const newX = e.clientX - dragOffset.x;
             const newY = e.clientY - dragOffset.y;
 
-            // Viewport Borders
             const maxX = window.innerWidth - 384;
             const maxY = window.innerHeight - 100;
 
@@ -141,7 +219,6 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
         setIsDragging(false);
     };
 
-    // Add global mouse event listeners
     useEffect(() => {
         if (isDragging) {
             document.addEventListener('mousemove', handleMouseMove);
@@ -155,24 +232,19 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
     }, [isDragging, dragOffset]);
 
     useEffect(() => {
-        if (selectedLink){
-            console.log("Selected link:", selectedLink);
-            console.log("Selected node:", selectedNode);
-            if(selectedNode != selectedLink.source.id) {
+        if (selectedLink) {
+            // console.log("Selected link:", selectedLink);
+            // console.log("Selected node:", selectedNode);
+            if (selectedNode != selectedLink.source.id) {
                 const displayedInterface = selectedLink.target_interface;
                 setSelectedInterfaces(new Set([displayedInterface]));
-            }
-            else
-            {
+            } else {
                 const displayedInterface = selectedLink.source_interface;
                 setSelectedInterfaces(new Set([displayedInterface]));
             }
-
         }
+    }, [selectedLink]);
 
-    },[selectedLink]);
-
-    // Interface selection handlers
     const toggleInterface = (interfaceName: string) => {
         setSelectedInterfaces(prev => {
             const newSet = new Set(prev);
@@ -185,13 +257,32 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
         });
     };
 
-
-
-
-
     const getInterfaceData = (interfaceName: string, counterType: keyof Counters) => {
         const history = interfaceHistories[interfaceName] || [];
         return history.filter(item => item != null && item.counters).map(item => item.counters[counterType]);
+    };
+
+    const getTrafficRateData = (interfaceName: string, rateType: 'inRateMbps' | 'outRateMbps') => {
+        const rateHistory = trafficRateHistories[interfaceName] || [];
+        return rateHistory.map(rate => rate[rateType]);
+    };
+
+    const formatRate = (rateBps: number): string => {
+        if (rateBps >= 1024 * 1024) {
+            return `${(rateBps / (1024 * 1024)).toFixed(2)} MB/s`;
+        } else if (rateBps >= 1024) {
+            return `${(rateBps / 1024).toFixed(2)} KB/s`;
+        } else {
+            return `${rateBps.toFixed(2)} B/s`;
+        }
+    };
+
+    const formatRateMbps = (rateMbps: number): string => {
+        if (rateMbps >= 1000) {
+            return `${(rateMbps / 1000).toFixed(2)} Gbit/s`;
+        } else {
+            return `${rateMbps.toFixed(2)} Mbit/s`;
+        }
     };
 
     const interfaceNames = Object.keys(allInterfaceData);
@@ -201,15 +292,15 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
         <>
             <div
                 ref={dragRef}
-                className={`fixed z-50 bg-black bg-opacity-75 text-white rounded-md text-sm font-mono shadow-lg w-96 max-h-screen overflow-hidden ${isDragging ? 'cursor-grabbing select-none' : ''}`}
+                className={`fixed z-50 bg-black bg-opacity-75 text-white rounded-md text-sm font-mono shadow-lg w-64 max-h-screen overflow-hidden ${isDragging ? 'cursor-grabbing select-none' : ''}`}
                 style={{
                     left: `${position.x}px`,
                     top: `${position.y}px`,
                 }}
             >
-                {/* Draggable header */}
+                {/* Draggable Header */}
                 <div
-                    className={`px-4 py-2 bg-gray-800 border-b border-gray-600 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} select-none`}
+                    className={`px-4 py-1 bg-gray-800 border-b border-gray-600 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} select-none`}
                     onMouseDown={handleMouseDown}
                 >
                     <div className="flex items-center justify-between">
@@ -257,7 +348,7 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
                 )}
 
                 {/* Content area with scroll */}
-                <div className="px-4 py-3 max-h-96 overflow-y-auto">
+                <div className="px-2 py-2 max-h-96 overflow-y-auto">
                     {interfaceNames.length === 0 && (
                         <div className="text-center text-gray-400 text-sm">
                             No interface data available
@@ -273,36 +364,49 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
                     {displayedInterfaces.map((interfaceName) => {
                         const interfaceData = allInterfaceData[interfaceName];
                         const history = interfaceHistories[interfaceName] || [];
+                        const currentRate = trafficRates[interfaceName];
 
                         if (!interfaceData) return null;
 
                         return (
-                            <div key={interfaceName}
-                                 className="mb-6 border-t border-gray-600 pt-4 first:border-t-0 first:pt-0">
-                                <div className="text-sm font-semibold mb-3 text-cyan-400">
+                            <div key={interfaceName} className="border-gray-600 border-b-2">
+                                <div className="text-sm text-left px-1 font-semibold text-cyan-400">
                                     {interfaceName}
                                 </div>
 
                                 {/* Sparklines */}
                                 {history.length > 0 && (
                                     <div className="space-y-2">
-                                        <div>
-                                            <div className="text-xs font-semibold mb-1 text-green-300">Input Packets</div>
-                                            <Sparklines data={getInterfaceData(interfaceName, 'inPkts')} limit={120}
-                                                        height={30} margin={1}>
-                                                <SparklinesLine color="#4ecdc4" style={{strokeWidth: 1}}/>
-                                                <SparklinesSpots/>
-                                            </Sparklines>
-                                        </div>
-
-                                        <div>
-                                            <div className="text-xs font-semibold mb-1 text-blue-300">Output Packets</div>
-                                            <Sparklines data={getInterfaceData(interfaceName, 'outPkts')} limit={120}
-                                                        height={30} margin={1}>
-                                                <SparklinesLine color="#45b7d1" style={{strokeWidth: 1}}/>
-                                                <SparklinesSpots/>
-                                            </Sparklines>
-                                        </div>
+                                                <div>
+                                                    {
+                                                        currentRate && (
+                                                            <div className="px-1 py-1 text-left text-xs">
+                                                                <div className="text-green-300">
+                                                                    ↓ In: {formatRateMbps(currentRate.inRateMbps)} ({formatRate(currentRate.inRate)})
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    }
+                                                    <Sparklines data={getTrafficRateData(interfaceName, 'inRateMbps')} limit={120} height={30} margin={1}>
+                                                        <SparklinesLine color="#4ecdc4" style={{strokeWidth: 1}}/>
+                                                        <SparklinesSpots/>
+                                                    </Sparklines>
+                                                </div>
+                                                <div>
+                                                    {
+                                                        currentRate && (
+                                                            <div className="px-1 py-1 text-left text-xs">
+                                                                <div className="text-blue-300">
+                                                                    ↑ Out: {formatRateMbps(currentRate.outRateMbps)} ({formatRate(currentRate.outRate)})
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    }
+                                                    <Sparklines data={getTrafficRateData(interfaceName, 'outRateMbps')} limit={120} height={30} margin={1}>
+                                                        <SparklinesLine color="#45b7d1" style={{strokeWidth: 1}}/>
+                                                        <SparklinesSpots/>
+                                                    </Sparklines>
+                                                </div>
                                     </div>
                                 )}
                             </div>
@@ -311,7 +415,7 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
                 </div>
             </div>
         </>
-    )
-}
+    );
+};
 
 export default CounterVisualization;
