@@ -73,17 +73,17 @@ Start the backend by navigating to the `backend` folder and run:
 python3 main.py
 ```
 
-Start the frontend by navigating in to the `frontend` folder and run
+Start the frontend by navigating in to the `frontend` folder and run:
 
 ```bash
 npm run dev
 ````
 
 Open the frontend application by clicking on the link deployed by the previous `npm` command.
-DigSiViz will open in the browser.
+DigSiViz will open in your browser.
 
-By clicking on `Topology`in the Navbar, you can open the visualization of the topology.
-The frontend should now connect to the backend and display the previously created containerlab topology.
+By clicking on `Topology`in the Navbar, you can open the topology visualization.
+The frontend is now connected to the backend and displays the previously created containerlab topology.
 
 ![Start Screen](/samples/1-iperf3/Sample1-TopologyScreen.png "Starting the topology visualization.")
 
@@ -91,23 +91,23 @@ You can now start inspecting the delivered data by clicking on a node or link. Y
 
 ![Displaying and Filtering Data](/samples/1-iperf3/Sample1-DisplayingAndFilteringData.png "Displaying and filtering monitoring data.")
 
-To monitor a `iperf3`-Test, you have to run following commands:
+To monitor an `iperf3` test, you have to run following commands:
 
 ```bash
 clab inspect # (In backend folder where the clab.yml is located)
 ```
 
-This command will show the container names that are instantiated by Containerlab.
+This command will show the container names that were instantiated by Containerlab.
 
 Continue choosing two hosts, e.g. `clab-ma-fp-stumpf-h1` and `clab-ma-fp-stumpf-h2`.
 
-Open a terminal and run
+Open a terminal and run:
 
 ```bash
 docker exec -it clab-ma-fp-stumpf-h1 bash
 ```
 
-In this window, you first retrieve the topology IP of the host using `ip a` command:
+In this window, you first retrieve the interface IP of the host using `ip a` command:
 ```bash
 >ip a
 [...]
@@ -120,7 +120,7 @@ In this window, you first retrieve the topology IP of the host using `ip a` comm
 [...]
 ```
 
-Run the `iperf3` server on this host:
+Run the `iperf3` server command on this host:
 
 ```bash
 iperf3 -s
@@ -132,7 +132,7 @@ Open another terminal window and run
 docker exec -it clab-ma-fp-stumpf-h2 bash
 ```
 
-Start the iperf3 using
+Start the iperf3 client using
 ```bash
 iperf3 -c 10.0.1.101 -t 60s
 ```
