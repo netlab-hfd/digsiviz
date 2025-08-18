@@ -62,9 +62,89 @@ sudo clab deploy
 The application is now ready for use.
 
 ## Samples
-TODO: iperf3 with pictures?
 
-TODO: More samples???
+### iPerf3 with Triangular Topology
+
+Follow the `Getting Started` guideline to achieve the running Containerlab topology and a ready-to-use application.
+
+Start the backend by navigating to the `backend` folder and run:
+
+```bash
+python3 main.py
+```
+
+Start the frontend by navigating in to the `frontend` folder and run
+
+```bash
+npm run dev
+````
+
+Open the frontend application by clicking on the link deployed by the previous `npm` command.
+DigSiViz will open in the browser.
+
+By clicking on `Topology`in the Navbar, you can open the visualization of the topology.
+The frontend should now connect to the backend and display the previously created containerlab topology.
+
+![Start Screen](/samples/1-iperf3/Sample1-TopologyScreen.png "Starting the topology visualization.")
+
+You can now start inspecting the delivered data by clicking on a node or link. You are also able to filter data.
+
+![Displaying and Filtering Data](/samples/1-iperf3/Sample1-DisplayingAndFilteringData.png "Displaying and filtering monitoring data.")
+
+To monitor a `iperf3`-Test, you have to run following commands:
+
+```bash
+clab inspect # (In backend folder where the clab.yml is located)
+```
+
+This command will show the container names that are instantiated by Containerlab.
+
+Continue choosing two hosts, e.g. `clab-ma-fp-stumpf-h1` and `clab-ma-fp-stumpf-h2`.
+
+Open a terminal and run
+
+```bash
+docker exec -it clab-ma-fp-stumpf-h1 bash
+```
+
+In this window, you first retrieve the topology IP of the host using `ip a` command:
+```bash
+>ip a
+[...]
+1403: eth1@if1402: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether aa:c1:ab:51:0d:cf brd ff:ff:ff:ff:ff:ff link-netnsid 1
+    inet 10.0.1.101/24 scope global eth1
+       valid_lft forever preferred_lft forever
+    inet6 fe80::a8c1:abff:fe51:dcf/64 scope link 
+       valid_lft forever preferred_lft forever
+[...]
+```
+
+Run the `iperf3` server on this host:
+
+```bash
+iperf3 -s
+````
+
+Open another terminal window and run
+
+```bash
+docker exec -it clab-ma-fp-stumpf-h2 bash
+```
+
+Start the iperf3 using
+```bash
+iperf3 -c 10.0.1.101 -t 60s
+```
+
+The `iperf3`test is now in progress and you can monitor it in DigSiViz:
+
+![Visualizing Live Traffic](/samples/1-iperf3/Sample1-LiveTraffic.png "Inspecting live traffic.")
+
+You can also stop the live visualization and navigate through the saved timestamps using the Time Machine functionality:
+
+![Using Time Machine](/samples/1-iperf3/Sample1-TimeMachine.png "Inspecting historical traffic using Time Machine.")
+
 
 ## License
 TODO: Choose a License before publishing the paper
