@@ -17,7 +17,7 @@ const ClabInfo: React.FC = () => {
     return (
         <div className="container py-4 h-full">
             {clabData.length === 0 ? (
-                <p className="text-center">Lade Container-Daten...</p>
+                <p className="text-center">Loading container data...</p>
             ) : (
                 <div className="row">
                     {clabData.map((container) => (

@@ -56,7 +56,7 @@ const TopologyVisualization: React.FC = () => {
                 const parsedData = JSON.parse(data.value);
                 setRouterData(parsedData);
             } catch (error) {
-                console.error("Fehler beim Parsen der WebSocket-Daten:", error);
+                console.error("Error parsing WebSocket data:", error);
             }
         });
 
@@ -69,7 +69,7 @@ const TopologyVisualization: React.FC = () => {
         fetch("http://127.0.0.1:5000/topology", {headers: {'Access-Control-Allow-Origin': '*'}})
             .then(response => response.json())
             .then(data => setGraphData(data))
-            .catch(error => console.error("Fehler beim Laden der Topologie:", error));
+            .catch(error => console.error("Error loading topology:", error));
     }, []);
 
     useEffect(() => {
@@ -94,7 +94,7 @@ const TopologyVisualization: React.FC = () => {
     };
 
     const renderData = (data: any) => {
-        if (!data) return <p>Keine Daten verfügbar.</p>;
+        if (!data) return <p>No data available.</p>;
 
         if (typeof data === 'object' && !Array.isArray(data)) {
             return (
@@ -120,7 +120,7 @@ const TopologyVisualization: React.FC = () => {
     };
 
     const filteredData = () => {
-        if (!routerData) return <p>Warte auf Daten...</p>;
+        if (!routerData) return <p>Waiting for data...</p>;
 
         const applyFilter = (data: any, routerData: any, interfaceName?: string) => {
             if (filter === "all") return data;
@@ -168,15 +168,15 @@ const TopologyVisualization: React.FC = () => {
                 return {[filter]: routerData[interfaceName][filter]};
             }
 
-            return {"Keine Daten gefunden für Filter": ""};
+            return {"No data found for filter": ""};
         };
 
 
         if (selectedNode) {
-            console.log("Node geklickt:", selectedNode);
+            console.log("Clicked node:", selectedNode);
             const nodeData = routerData[selectedNode];
 
-            if (!nodeData) return <p>Keine Daten für {selectedNode} gefunden.</p>;
+            if (!nodeData) return <p>No data found for {selectedNode}.</p>;
 
             return renderData(applyFilter(nodeData, routerData[selectedNode]));
         }
@@ -201,7 +201,7 @@ const TopologyVisualization: React.FC = () => {
             console.log("Target Router:", targetRouterData);
 
             if (!sourceRouterData) {
-                return <p>Keine Daten für {sourceId} gefunden.</p>;
+                return <p>No data found for {sourceId}.</p>;
             }
 
             const sourceInterfaceData = sourceRouterData[source_interface] || sourceRouterData || null;
@@ -212,14 +212,14 @@ const TopologyVisualization: React.FC = () => {
 
             return (
                 <>
-                    <h4>Interface von {sourceId}: {source_interface}</h4>
+                    <h4>Interface of {sourceId}: {source_interface}</h4>
                     {sourceInterfaceData ? renderData(applyFilter(sourceInterfaceData, sourceRouterData, source_interface)) :
-                        <p>Keine Daten für {source_interface}.</p>}
+                        <p>No data available for {source_interface}.</p>}
 
                     {targetInterfaceData && (
                         <>
                             <hr/>
-                            <h4>Interface von {targetId}: {target_interface}</h4>
+                            <h4>Interface of {targetId}: {target_interface}</h4>
                             {renderData(applyFilter(targetInterfaceData, targetRouterData, target_interface))}
                         </>
                     )}
@@ -227,7 +227,7 @@ const TopologyVisualization: React.FC = () => {
             );
         }
 
-        return <p>Wähle einen Node oder Link aus.</p>;
+        return <p>Choose a node or link.</p>;
     };
 
 
@@ -236,7 +236,7 @@ const TopologyVisualization: React.FC = () => {
 
             <div className="container-fluid d-flex p-0 h-screen">
                 <div className="row flex-grow-1 m-0 h-full">
-                    {/* Linke Spalte (Echtzeit-Infos)*/}
+                    {/* Left Column (Real-Time Information)*/}
                     <div className="col-4  overflow-hidden bg-light h-full">
                         <TimeMachine/>
                     <div className="p-2 overflow-auto bg-light h-full" >
@@ -250,15 +250,15 @@ const TopologyVisualization: React.FC = () => {
 
                         <label>Filter: </label>
                         <select className="form-select mb-2" value={filter} onChange={(e) => setFilter(e.target.value)}>
-                            <option value="all">Alle Daten</option>
-                            <option value="statistics">Statistiken</option>
-                            <option value="traffic-rate">Datenrate</option>
+                            <option value="all">All</option>
+                            <option value="statistics">Statistics</option>
+                            <option value="traffic-rate">Traffic Rate</option>
                             <option value="transceiver">Transceiver</option>
                         </select>
                         {filteredData()}
                     </div>
                     </div>
-                    {/* Rechte Spalte (ForceGraph) */}
+                    {/* Right Column (ForceGraph) */}
                     <div className="col-8 p-2 h-screen overflow-hidden">
                     <ForceGraph2D
                             width={window.innerWidth * 0.66}
