@@ -1,5 +1,5 @@
 import React, {useEffect, useState, useRef} from "react";
-import {Sparklines, SparklinesLine, SparklinesSpots} from "react-sparklines";
+import {Sparklines, SparklinesLine, SparklinesSpots, SparklinesReferenceLine} from "react-sparklines";
 
 interface Link {
     source: string;
@@ -54,8 +54,6 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
     // Interface selection states
     const [selectedInterfaces, setSelectedInterfaces] = useState<Set<string>>(new Set());
     const [showInterfaceSelector, setShowInterfaceSelector] = useState(false);
-
-
 
     useEffect(() => {
         setAllInterfaceData({});
@@ -132,25 +130,25 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
 
                 const timeDiffSeconds = (current.timestamp - previous.timestamp) / 1000000000; // Nanoseconds to seconds
 
-               /* console.log(`Interface ${interfaceName}:`);
-                console.log(`  Current timestamp: ${current.timestamp}`);
-                console.log(`  Previous timestamp: ${previous.timestamp}`);
-                console.log(`  Time diff (nanoseconds): ${current.timestamp - previous.timestamp}`);
-                console.log(`  Time diff (seconds): ${timeDiffSeconds}`);
-                console.log(`  Current inOctets: ${current.counters.inOctets}`);
-                console.log(`  Previous inOctets: ${previous.counters.inOctets}`);*/
+                /* console.log(`Interface ${interfaceName}:`);
+                 console.log(`  Current timestamp: ${current.timestamp}`);
+                 console.log(`  Previous timestamp: ${previous.timestamp}`);
+                 console.log(`  Time diff (nanoseconds): ${current.timestamp - previous.timestamp}`);
+                 console.log(`  Time diff (seconds): ${timeDiffSeconds}`);
+                 console.log(`  Current inOctets: ${current.counters.inOctets}`);
+                 console.log(`  Previous inOctets: ${previous.counters.inOctets}`);*/
 
                 if (timeDiffSeconds > 0) {
                     const inOctetsDiff = Math.max(0, current.counters.inOctets - previous.counters.inOctets);
                     const outOctetsDiff = Math.max(0, current.counters.outOctets - previous.counters.outOctets);
 
-/*                  console.log(`  inOctets diff: ${inOctetsDiff}`);
-                    console.log(`  outOctets diff: ${outOctetsDiff}`);*/
+                    /*                  console.log(`  inOctets diff: ${inOctetsDiff}`);
+                                        console.log(`  outOctets diff: ${outOctetsDiff}`);*/
 
                     const inRateBps = inOctetsDiff / timeDiffSeconds;
                     const outRateBps = outOctetsDiff / timeDiffSeconds;
-/*                  console.log(`  inRate B/s: ${inRateBps}`);
-                    console.log(`  outRate B/s: ${outRateBps}`);*/
+                    /*                  console.log(`  inRate B/s: ${inRateBps}`);
+                                        console.log(`  outRate B/s: ${outRateBps}`);*/
 
                     // Convert to Mbps
                     const inRateMbps = (inRateBps * 8) / 1000000;
@@ -267,6 +265,12 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
         return rateHistory.map(rate => rate[rateType]);
     };
 
+    const calculateAverage = (data: number[]): number => {
+        if (data.length === 0) return 0;
+        const sum = data.reduce((acc, value) => acc + value, 0);
+        return sum / data.length;
+    };
+
     const formatRate = (rateBps: number): string => {
         if (rateBps >= 1024 * 1024) {
             return `${(rateBps / (1024 * 1024)).toFixed(2)} MB/s`;
@@ -366,47 +370,58 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
                         const history = interfaceHistories[interfaceName] || [];
                         const currentRate = trafficRates[interfaceName];
 
+                        const inRateData = getTrafficRateData(interfaceName, 'inRateMbps');
+                        const outRateData = getTrafficRateData(interfaceName, 'outRateMbps');
+                        const avgInRate = calculateAverage(inRateData);
+                        const avgOutRate = calculateAverage(outRateData);
+
                         if (!interfaceData) return null;
 
                         return (
                             <div key={interfaceName} className="border-gray-600 border-b-2">
-                                <div className="text-sm text-left px-1 font-semibold text-cyan-400">
+                                <div className="text-sm text-left px-1 font-semibold text-white">
                                     {interfaceName}
                                 </div>
 
                                 {/* Sparklines */}
                                 {history.length > 0 && (
                                     <div className="space-y-2">
-                                                <div>
-                                                    {
-                                                        currentRate && (
-                                                            <div className="px-1 py-1 text-left text-xs">
-                                                                <div className="text-green-300">
-                                                                    ↓ In: {formatRateMbps(currentRate.inRateMbps)} ({formatRate(currentRate.inRate)})
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    }
-                                                    <Sparklines data={getTrafficRateData(interfaceName, 'inRateMbps')} limit={120} height={30} margin={1}>
-                                                        <SparklinesLine color="#4ecdc4" style={{strokeWidth: 1}}/>
-                                                        <SparklinesSpots/>
-                                                    </Sparklines>
+                                        <div>
+                                            {currentRate && (
+                                                <div className="px-1 py-1 text-left text-xs">
+                                                    <div className="text-green-300 flex justify-between">
+                                                        <span>↓ In: {formatRateMbps(currentRate.inRateMbps)}</span>
+                                                        <span className="text-gray-400">Ø {formatRateMbps(avgInRate)}</span>
+                                                    </div>
+{/*                                                    <div className="text-gray-500 text-xs">
+                                                        ({formatRate(currentRate.inRate)})
+                                                    </div>*/}
                                                 </div>
-                                                <div>
-                                                    {
-                                                        currentRate && (
-                                                            <div className="px-1 py-1 text-left text-xs">
-                                                                <div className="text-blue-300">
-                                                                    ↑ Out: {formatRateMbps(currentRate.outRateMbps)} ({formatRate(currentRate.outRate)})
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    }
-                                                    <Sparklines data={getTrafficRateData(interfaceName, 'outRateMbps')} limit={120} height={30} margin={1}>
-                                                        <SparklinesLine color="#45b7d1" style={{strokeWidth: 1}}/>
-                                                        <SparklinesSpots/>
-                                                    </Sparklines>
+                                            )}
+                                            <Sparklines data={inRateData} limit={120} height={30} margin={1}>
+                                                <SparklinesLine color="#4ecdc4" style={{strokeWidth: 1}}/>
+                                                <SparklinesReferenceLine type="avg" style={{stroke: '#22c55e', strokeWidth: 1, strokeDasharray: '2,2'}}/>
+                                                <SparklinesSpots/>
+                                            </Sparklines>
+                                        </div>
+                                        <div>
+                                            {currentRate && (
+                                                <div className="px-1 py-1 text-left text-xs">
+                                                    <div className="text-blue-300 flex justify-between">
+                                                        <span>↑ Out: {formatRateMbps(currentRate.outRateMbps)}</span>
+                                                        <span className="text-gray-400">Ø {formatRateMbps(avgOutRate)}</span>
+                                                    </div>
+{/*                                                    <div className="text-gray-500 text-xs">
+                                                        ({formatRate(currentRate.outRate)})
+                                                    </div>*/}
                                                 </div>
+                                            )}
+                                            <Sparklines data={outRateData} limit={120} height={30} margin={1}>
+                                                <SparklinesLine color="#45b7d1" style={{strokeWidth: 1}}/>
+                                                <SparklinesReferenceLine type="avg" style={{stroke: '#3b82f6', strokeWidth: 1, strokeDasharray: '2,2'}}/>
+                                                <SparklinesSpots/>
+                                            </Sparklines>
+                                        </div>
                                     </div>
                                 )}
                             </div>
