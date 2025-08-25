@@ -8,8 +8,6 @@ layer and gNMI for realtime data retrieval.
 - [Prerequirements](#Prerequirements)
 - [Getting Started](#Getting-Started)
 - [Samples](#Samples)
-- [License](#License)
-- [Contribute](#Contribute)
 
 ## Prerequirements
 In order to run the project, you need to have 
