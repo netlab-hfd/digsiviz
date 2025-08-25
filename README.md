@@ -144,10 +144,3 @@ The `iperf3`test is now in progress and you can monitor it in DigSiViz:
 You can also stop the live visualization and navigate through the saved timestamps using the Time Machine functionality:
 
 ![Using Time Machine](/samples/1-iperf3/Sample1-TimeMachine.png "Inspecting historical traffic using Time Machine.")
-
-
-## License
-TODO: Choose a License before publishing the paper
-
-## Contribute
-TODO: Contributions welcome or not?
