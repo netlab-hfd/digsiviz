@@ -369,7 +369,7 @@ const TopologyVisualization: React.FC = () => {
                                     ctx.textAlign = "center";
                                     ctx.textBaseline = "middle";
 
-                                    const text = `${link.source_interface} -> ${link.target_interface}`;
+                                    const text = `${link.source?.id}/${link.source_interface}<->${link.target?.id}/${link.target_interface}`;
                                     const textWidth = ctx.measureText(text).width;
                                     ctx.fillStyle = "white";
                                     ctx.fillRect(midX - textWidth/2 - 2, midY - fontSize/2 - 1, textWidth + 4, fontSize + 2);
@@ -405,7 +405,7 @@ const TopologyVisualization: React.FC = () => {
                                     ctx.textAlign = "center";
                                     ctx.textBaseline = "middle";
 
-                                    const text = `${link.source_interface} -> ${link.target_interface}`;
+                                    const text = `${link.source?.id}/${link.source_interface}<->${link.target?.id}/${link.target_interface}`;
                                     const textWidth = ctx.measureText(text).width;
                                     ctx.fillStyle = "white";
                                     ctx.fillRect(midX - textWidth/2 - 2, midY - fontSize/2 - 1, textWidth + 4, fontSize + 2);

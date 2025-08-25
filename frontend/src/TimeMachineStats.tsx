@@ -195,12 +195,12 @@ const TimeMachineStats: React.FC = () => {
             </div>
 
 
-            <div className="font-bold text-xl mt-3 mb-1 text-center text-decoration-underline">Durations</div>
+{/*            <div className="font-bold text-xl mt-3 mb-1 text-center text-decoration-underline">Durations</div>
 
             <div className="font-semibold mt-3 mb-1 text-center">Min Router Timestamp to Render Duration</div>
             <div className="text-center text-xs">
                 {minRouterTimeStampToRenderDuration} ms
-            </div>
+            </div>*/}
 
 
  {/*           <div className="font-semibold mt-3 mb-1 text-center">Cycle Start Time to Render Duration</div>
