@@ -203,7 +203,7 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
             const newX = e.clientX - dragOffset.x;
             const newY = e.clientY - dragOffset.y;
 
-            const maxX = window.innerWidth - 384;
+            const maxX = window.innerWidth ;
             const maxY = window.innerHeight - 100;
 
             setPosition({
@@ -352,7 +352,7 @@ const CounterVisualization: React.FC<CounterVisualizationProps> = ({routerData, 
                 )}
 
                 {/* Content area with scroll */}
-                <div className="px-2 py-2 max-h-96 overflow-y-auto">
+                <div className="px-2 py-2 ">
                     {interfaceNames.length === 0 && (
                         <div className="text-center text-gray-400 text-sm">
                             No interface data available

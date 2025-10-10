@@ -26,7 +26,23 @@ interface GraphData {
     links: Link[];
 }
 
+interface LinkTrafficRate {
+    sourceInRate: number;
+    sourceOutRate: number;
+    targetInRate: number;
+    targetOutRate: number;
+    maxRate: number;
+    totalRate: number;
+}
+
+interface InterfaceHistory {
+    timestamp: number;
+    inOctets: number;
+    outOctets: number;
+}
+
 const socket = io('http://127.0.0.1:5000');
+const MAX_BANDWIDTH_MBPS = 10; // 10 Mbit/s maximum bandwidth
 
 const TopologyVisualization: React.FC = () => {
     const [routerData, setRouterData] = useState<any>(null);
@@ -34,6 +50,8 @@ const TopologyVisualization: React.FC = () => {
     const [selectedLink, setSelectedLink] = useState<Link | null>(null);
     const [graphData, setGraphData] = useState<GraphData>({nodes: [], links: []});
     const [filter, setFilter] = useState<string>("all");
+    const [linkTrafficRates, setLinkTrafficRates] = useState<{ [key: string]: LinkTrafficRate }>({});
+    const [interfaceHistories, setInterfaceHistories] = useState<{ [key: string]: InterfaceHistory[] }>({});
     const fgRef = useRef<any>(null);
 
     const imageCache = useRef<{ [key: string]: HTMLImageElement }>({});
@@ -50,6 +68,54 @@ const TopologyVisualization: React.FC = () => {
         return img;
     };
 
+    const getLinkColor = (utilizationPercent: number): string => {
+        if (utilizationPercent < 5) {
+            return "lightgray";
+        } else if (utilizationPercent < 25) {
+            return "#22c55e"; // Green
+        } else if (utilizationPercent < 50) {
+            return "#84cc16"; // Light green
+        } else if (utilizationPercent < 75) {
+            return "#eab308"; // Yellow
+        } else if (utilizationPercent < 90) {
+            return "#f97316"; // Orange
+        } else {
+            return "#ef4444"; // Red
+        }
+    };
+
+    // Function to calculate traffic rates for an interface
+    const calculateInterfaceRates = (nodeId: string, interfaceName: string): { inRate: number, outRate: number } => {
+        const historyKey = `${nodeId}-${interfaceName}`;
+        const history = interfaceHistories[historyKey] || [];
+
+        if (history.length < 2) return { inRate: 0, outRate: 0 };
+
+        const current = history[history.length - 1];
+        const previous = history[history.length - 2];
+
+        const timeDiffSeconds = (current.timestamp - previous.timestamp) / 1000000000; // Nanoseconds to seconds
+
+        if (timeDiffSeconds <= 0) return { inRate: 0, outRate: 0 };
+
+        const inOctetsDiff = Math.max(0, current.inOctets - previous.inOctets);
+        const outOctetsDiff = Math.max(0, current.outOctets - previous.outOctets);
+
+        const inRateBps = inOctetsDiff / timeDiffSeconds;
+        const outRateBps = outOctetsDiff / timeDiffSeconds;
+
+        const inRateMbps = (inRateBps * 8) / 1000000; // Convert to Mbps
+        const outRateMbps = (outRateBps * 8) / 1000000; // Convert to Mbps
+
+        return { inRate: inRateMbps, outRate: outRateMbps };
+    };
+
+
+    const getLinkId = (link: Link): string => {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+        return `${sourceId}-${link.source_interface}-${targetId}-${link.target_interface}`;
+    };
 
     const getParallelLinkOffset = (link: any, allLinks: any[]) => {
         const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
@@ -66,11 +132,8 @@ const TopologyVisualization: React.FC = () => {
         if (parallelLinks.length <= 1) return 0;
 
         const currentIndex = parallelLinks.findIndex(l => l === link);
-
-
         const totalLinks = parallelLinks.length;
         const offsetStep = 25;
-
 
         return (currentIndex - (totalLinks - 1) / 2) * offsetStep;
     };
@@ -96,6 +159,74 @@ const TopologyVisualization: React.FC = () => {
             .then(data => setGraphData(data))
             .catch(error => console.error("Fehler beim Laden der Topologie:", error));
     }, []);
+
+    useEffect(() => {
+        if (!routerData) return;
+
+        setInterfaceHistories(prevHistories => {
+            const newHistories = { ...prevHistories };
+
+            Object.keys(routerData).forEach(nodeId => {
+                const nodeData = routerData[nodeId];
+                if (!nodeData) return;
+
+                Object.keys(nodeData).forEach(interfaceName => {
+                    const interfaceData = nodeData[interfaceName];
+                    if (interfaceData &&
+                        interfaceData["openconfig-interfaces:state"] &&
+                        interfaceData["openconfig-interfaces:state"]["counters"]) {
+
+                        const historyKey = `${nodeId}-${interfaceName}`;
+                        const currentHistory = newHistories[historyKey] || [];
+
+                        const newEntry: InterfaceHistory = {
+                            timestamp: interfaceData["timestamp"] || Date.now(),
+                            inOctets: interfaceData["openconfig-interfaces:state"]["counters"]["in-octets"] || 0,
+                            outOctets: interfaceData["openconfig-interfaces:state"]["counters"]["out-octets"] || 0
+                        };
+
+                        const updatedHistory = [...currentHistory, newEntry];
+                        const limitedHistory = updatedHistory.length > 120 ?
+                            updatedHistory.slice(updatedHistory.length - 120) : updatedHistory;
+
+                        newHistories[historyKey] = limitedHistory;
+                    }
+                });
+            });
+
+            return newHistories;
+        });
+    }, [routerData]);
+
+    useEffect(() => {
+        if (!routerData || !graphData.links.length) return;
+
+        const newLinkTrafficRates: { [key: string]: LinkTrafficRate } = {};
+
+        graphData.links.forEach(link => {
+            const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+            const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+            const sourceRates = calculateInterfaceRates(sourceId, link.source_interface);
+            const targetRates = calculateInterfaceRates(targetId, link.target_interface);
+
+            const allRates = [sourceRates.inRate, sourceRates.outRate, targetRates.inRate, targetRates.outRate];
+            const maxRate = Math.max(...allRates);
+            const totalRate = allRates.reduce((sum, rate) => sum + rate, 0);
+
+            const linkId = getLinkId(link);
+            newLinkTrafficRates[linkId] = {
+                sourceInRate: sourceRates.inRate,
+                sourceOutRate: sourceRates.outRate,
+                targetInRate: targetRates.inRate,
+                targetOutRate: targetRates.outRate,
+                maxRate,
+                totalRate
+            };
+        });
+
+        setLinkTrafficRates(newLinkTrafficRates);
+    }, [interfaceHistories, graphData.links, routerData]);
 
     useEffect(() => {
         fgRef.current.d3Force('charge', forceManyBody().strength(-300));
@@ -325,7 +456,7 @@ const TopologyVisualization: React.FC = () => {
                             </div>
                             `}
                             nodeCanvasObject={(node, ctx, globalScale) => {
-                                const fontSize = 11 / globalScale;
+                                const fontSize = 16 / globalScale;
                                 ctx.font = `${fontSize}px Sans-Serif`;
                                 ctx.textAlign = "center";
                                 ctx.textBaseline = "middle";
@@ -349,21 +480,28 @@ const TopologyVisualization: React.FC = () => {
                                 const source = link.source as { x: number; y: number };
                                 const target = link.target as { x: number; y: number };
 
+                                const linkId = getLinkId(link);
+                                const linkTraffic = linkTrafficRates[linkId];
+                                const utilizationPercent = linkTraffic ?
+                                    (linkTraffic.maxRate / MAX_BANDWIDTH_MBPS) * 100 : 0;
+
+                                const linkColor = getLinkColor(utilizationPercent);
+                                const lineWidth = utilizationPercent > 5 ?
+                                    Math.min(4, 1 + (utilizationPercent / 25)) : 1;
 
                                 const offset = getParallelLinkOffset(link, graphData.links);
                                 if (offset === 0) {
-
                                     ctx.beginPath();
                                     ctx.moveTo(source.x, source.y);
                                     ctx.lineTo(target.x, target.y);
-                                    ctx.strokeStyle = "lightgray";
-                                    ctx.lineWidth = 1;
+                                    ctx.strokeStyle = linkColor;
+                                    ctx.lineWidth = lineWidth;
                                     ctx.stroke();
 
                                     const midX = (source.x + target.x) / 2;
                                     const midY = (source.y + target.y) / 2;
 
-                                    const fontSize = 9 / globalScale;
+                                    const fontSize = 15 / globalScale;
                                     ctx.font = `${fontSize}px Sans-Serif`;
                                     ctx.fillStyle = "blue";
                                     ctx.textAlign = "center";
@@ -377,11 +515,9 @@ const TopologyVisualization: React.FC = () => {
                                     ctx.fillStyle = "blue";
                                     ctx.fillText(text, midX, midY);
                                 } else {
-
                                     const dx = target.x - source.x;
                                     const dy = target.y - source.y;
                                     const distance = Math.sqrt(dx * dx + dy * dy);
-
 
                                     const normalX = -dy / distance * offset;
                                     const normalY = dx / distance * offset;
@@ -392,14 +528,14 @@ const TopologyVisualization: React.FC = () => {
                                     ctx.beginPath();
                                     ctx.moveTo(source.x, source.y);
                                     ctx.quadraticCurveTo(controlX, controlY, target.x, target.y);
-                                    ctx.strokeStyle = "lightgray";
-                                    ctx.lineWidth = 1;
+                                    ctx.strokeStyle = linkColor;
+                                    ctx.lineWidth = lineWidth;
                                     ctx.stroke();
 
                                     const midX = (source.x + target.x) / 2 + normalX * 0.7;
                                     const midY = (source.y + target.y) / 2 + normalY * 0.7;
 
-                                    const fontSize = 9 / globalScale;
+                                    const fontSize = 15 / globalScale;
                                     ctx.font = `${fontSize}px Sans-Serif`;
                                     ctx.fillStyle = "blue";
                                     ctx.textAlign = "center";

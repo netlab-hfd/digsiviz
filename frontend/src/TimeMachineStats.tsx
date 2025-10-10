@@ -162,17 +162,17 @@ const TimeMachineStats: React.FC = () => {
                 {average !== null ? average.toFixed(4) : "–"} ms
             </div>
 
-            <div className="font-semibold mt-3 mb-1 text-center">Min Router Timestamp</div>
+{/*            <div className="font-semibold mt-3 mb-1 text-center">Min Router Timestamp</div>
             <div className="text-center text-xs">
                 {formatTimestamp(minRouterTimeStamp)}
             </div>
 
-            <div className="font-bold text-xl mt-3 mb-1 text-center text-decoration-underline">App Values</div>
+            <div className="font-bold text-xl mt-3 mb-1 text-center text-decoration-underline">App Values</div>*/}
  {/*           <div className="font-semibold mt-3 mb-1 text-center">Polling Cycle Start Time</div>
             <div className="text-center text-xs">
                 {formatTimestamp(backendDataPollingCycleStartTime)}
             </div>*/}
-
+{/*
             <div className="font-semibold mt-3 mb-1 text-center">gNMI General (End) Timestamp</div>
             <div className="text-center text-xs">
                 {formatTimestamp(gnmiDataCollectionTimeStamp)}
@@ -181,18 +181,20 @@ const TimeMachineStats: React.FC = () => {
             <div className="font-semibold mt-3 mb-1 text-center">gNMI Poll Duration</div>
             <div className="text-center text-xs">
                 {gnmiPollingDuration} ms
-            </div>
+            </div>*/}
 
 {/*            <div className="font-semibold mt-3 mb-1 text-center">Backend Cycle Duration</div>
             <div className="text-center text-xs">
                 {backendDataPollingCycleDuration} ms
             </div>*/}
 
+{/*
 
             <div className="font-semibold mt-3 mb-1 text-center">Current Frontend Timestamp</div>
             <div className="text-center text-xs">
                 {formatTimestamp(frontendTimestamp)}
             </div>
+*/}
 
 
 {/*            <div className="font-bold text-xl mt-3 mb-1 text-center text-decoration-underline">Durations</div>
@@ -208,12 +210,12 @@ const TimeMachineStats: React.FC = () => {
                 {backendDataPollingCycleStartToRenderDuration} ms
             </div>*/}
 
-            <button
+{/*            <button
                 onClick={saveCsv}
                 className="mt-4 w-full bg-cyan-700 hover:bg-cyan-800 text-white py-1 px-2 rounded"
             >
                 Save CSV
-            </button>
+            </button>*/}
 
 
         </div>
