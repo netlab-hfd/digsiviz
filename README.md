@@ -8,6 +8,7 @@ layer and gNMI for realtime data retrieval.
 - [Prerequirements](#Prerequirements)
 - [Getting Started](#Getting-Started)
 - [Samples](#Samples)
+- [Publications](#Publications)
 
 ## Prerequirements
 In order to run the project, you need to have 
@@ -142,3 +143,12 @@ The `iperf3`test is now in progress and you can monitor it in DigSiViz:
 You can also stop the live visualization and navigate through the saved timestamps using the Time Machine functionality:
 
 ![Using Time Machine](/samples/1-iperf3/Sample1-TimeMachine.png "Inspecting historical traffic using Time Machine.")
+
+## Publications
+
+This project was presented at the **AnServApp Workshop** at **CNSM 2025**:
+
+> **Paper:** “Using Network Digital Twin Visualization for Application Traffic Engineering”  
+> **Authors:** Felix Stumpf, Leon-Niklas Lux, Sebastian Rieger  
+> 📄 [Read the paper](https://opendl.ifip-tc6.org/db/conf/cnsm/cnsm2025/1571191564.pdf)  
+> 🌐 [Conference website](https://www.cnsm-conf.org/)
