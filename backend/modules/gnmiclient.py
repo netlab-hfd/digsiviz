@@ -12,6 +12,11 @@ class GnmiClient():
     """
     
     username = "admin"
+    # SECURITY: hard-coded credential. "NokiaSrl1!" is the SR Linux default password and
+    # is acceptable for this throwaway containerlab testbed, but it should not be committed
+    # for any non-lab use. Prefer reading it from the topology config / an environment
+    # variable so credentials are not baked into source control. (Same value is also
+    # duplicated as a default arg in __init__ below.)
     password = "NokiaSrl1!"
     port = 57401
 
