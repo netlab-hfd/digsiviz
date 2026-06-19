@@ -1,7 +1,7 @@
 version: "3"
 services:
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.5.0
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
@@ -12,7 +12,7 @@ services:
       - kafka_network
 
   kafka:
-    image: confluentinc/cp-kafka:latest
+    image: confluentinc/cp-kafka:7.5.0
     depends_on:
       - zookeeper
     container_name: kafka
@@ -69,6 +69,24 @@ services:
       INFLUXDB_USER: user
       INFLUXDB_USER_PASSWORD: password
 
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - 3000:3000
+    networks:
+      - kafka_network
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+
 networks:
   kafka_network:
     name: kafka_docker_net
+
+volumes:
+  grafana-storage:

@@ -18,7 +18,7 @@ class GnmiClient():
     """
     username = "admin"
     password = "NokiaSrl1!"
-    port = 57401
+    port = 57400
 
     router_ips = None
 
@@ -27,11 +27,11 @@ class GnmiClient():
     subscription_lock = None
 
 
-    def __init__(self, yamlinterpreter: YamlInterpreter, clabassistant: ClabAssistant, username = "admin", password = "NokiaSrl1!", port = 57401):
+    def __init__(self, yamlinterpreter: YamlInterpreter, clabassistant: ClabAssistant, username = "admin", password = "NokiaSrl1!", port = 57400):
         super().__init__()
         self.username = username
         self.password = password
-        self.port = 57401
+        self.port = port
         self.yaml = yamlinterpreter
         self.clab = clabassistant
         self.router_ips = self.clab.get_clab_router_ips()
@@ -57,7 +57,7 @@ class GnmiClient():
         credentials = (gnmi_defaults["username"], gnmi_defaults["password"])
 
         try:
-            with gNMIclient(target=target, username=credentials[0], password=credentials[1], insecure=True) as gnmi:
+            with gNMIclient(target=target, username=credentials[0], password=credentials[1], skip_verify=True) as gnmi:
                 response = gnmi.get(path=gnmi_paths, encoding="json_ietf")
 
             collected_timestamps = []
@@ -78,7 +78,7 @@ class GnmiClient():
 
                         converted_json_obj = self.convert_numbers(json_flat)
 
-                        converted_json= json.dumps(converted_json_obj, indent=None)
+                        #converted_json= json.dumps(converted_json_obj, indent=None)
 
 
                         json_data= {
@@ -150,7 +150,7 @@ class GnmiClient():
         global_stats = self.statistics.calc_statistics("global", timestamp_iso, collected_global_timestamps, elapsed_time)
         self.kafka.send_message("gnmi_stats", "global", json.dumps(global_stats, indent=None))
         
-        return routers_data #TODO: remove....
+        return routers_data #TODO: remove, as data is already in Kafka (distributed consumer needed)...
     
 
 

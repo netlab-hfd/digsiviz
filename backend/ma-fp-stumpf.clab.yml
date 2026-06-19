@@ -25,6 +25,8 @@ topology:
       #mgmt_ipv4: 172.100.100.10
       #mgmt_ipv6: 2001:172:100:100::10
       startup-config: config/r1-bgp.cfg
+      exec:
+        - sr_cli -ec "/system grpc-server mgmt rate-limit 65535"
     r2:
       #kind: ceos
       #image: ceos:4.33.0F
@@ -34,6 +36,8 @@ topology:
       #mgmt_ipv4: 172.100.100.20
       #mgmt_ipv6: 2001:172:100:100::20
       startup-config: config/r2-bgp.cfg
+      exec:
+        - sr_cli -ec "/system grpc-server mgmt rate-limit 65535"
     r3:
       #kind: ceos
       #image: ceos:4.33.0F
@@ -43,6 +47,8 @@ topology:
       #mgmt_ipv4: 172.100.100.30
       #mgmt_ipv6: 2001:172:100:100::30
       startup-config: config/r3-bgp.cfg
+      exec:
+        - sr_cli -ec "/system grpc-server mgmt rate-limit 65535"
     h1:
       kind: linux
       group: hosts
