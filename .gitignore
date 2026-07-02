@@ -429,3 +429,6 @@ sketch
 .history
 .ionide
 
+
+### Containerlab runtime output (certs, keys, per-node state — regenerated on deploy)
+backend/clab-*/

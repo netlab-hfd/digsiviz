@@ -1,0 +1,28 @@
+# Grafana datasource provisioning — automates the manual "Add data source"
+# steps from the README (Connections -> Data sources -> InfluxDB, Flux).
+# Loaded at Grafana startup from /etc/grafana/provisioning/datasources/.
+#
+# Secrets/config are interpolated from the grafana container's environment
+# ($VAR syntax), which the docker-compose grafana service pulls from .env —
+# same single-source-of-truth pattern as the InfluxDB manifest. No literals here.
+apiVersion: 1
+
+datasources:
+  - name: influxdb
+    type: influxdb
+    # Explicit UID so the provisioned dashboard can reference it by a stable
+    # value (traffic.json uses uid "influxdb"). Without this Grafana assigns a
+    # random UID and the dashboard's datasource link breaks.
+    uid: influxdb
+    access: proxy
+    # Container-to-container: Grafana reaches InfluxDB by service name on the
+    # shared docker network (localhost would be the Grafana container itself).
+    url: http://influxdb:8086
+    isDefault: true
+    jsonData:
+      version: Flux            # "Query language = Flux" — must be set for org/token/bucket to apply
+      organization: $INFLUX_ORG
+      defaultBucket: $INFLUX_BUCKET
+      httpMode: POST
+    secureJsonData:
+      token: $INFLUX_TOKEN

@@ -46,6 +46,7 @@ Clone the repository to your local computer:
 
 ```bash
 git clone https://github.com/netlab-hfd/digsiviz
+cd digsiviz
 ```
 
 You need to install the dependencies of the frontend and backend individually.
@@ -53,7 +54,7 @@ Starting with the frontend, change into the
 `frontend` folder and run npm:
 
 ```bash
-cd frontend
+cd "$(git rev-parse --show-toplevel)/frontend"
 npm install
 ```
 
@@ -63,7 +64,7 @@ install all required packages. We recommend installing them into
 a virtual environment to avoid cluttering your python system packages:
 
 ```bash
-cd backend
+cd "$(git rev-parse --show-toplevel)/backend"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -74,6 +75,7 @@ running for the application to work. In the `backend` folder
 is a sample topology that can be deployed:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)/backend"
 sudo clab deploy
 ```
 
@@ -85,15 +87,22 @@ The application is now ready for use.
 
 Follow the `Getting Started` guideline to achieve the running Containerlab topology and a ready-to-use application.
 
+**On this branch, run the [Start the services](#start-the-services) step first
+— `main.py` opens a Kafka producer at startup and will fail with a broker
+connection error if the services are not up.**
+
 Start the backend by navigating to the `backend` folder and run:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)/backend"
+source .venv/bin/activate
 python3 main.py
 ```
 
 Start the frontend by navigating in to the `frontend` folder and run:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)/frontend"
 npm run dev
 ````
 
@@ -112,6 +121,7 @@ You can now start inspecting the delivered data by clicking on a node or link. Y
 To monitor an `iperf3` test, you have to run following commands:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)/backend"
 clab inspect # (In backend folder where the clab.yml is located)
 ```
 
@@ -223,7 +233,7 @@ are already included in `backend/requirements.txt` and are installed by the
 `Getting Started` step. Verify the backend imports resolve:
 
 ```bash
-source .venv/bin/activate
+source "$(git rev-parse --show-toplevel)/backend/.venv/bin/activate"
 python -c "import flask, flask_socketio, flask_cors, pygnmi, confluent_kafka, flatdict, flatten_json; print('deps ok')"
 ```
 
@@ -235,22 +245,31 @@ This starts five containers: `zookeeper` and `kafka` (message bus), `influxdb`
 (time series store), `telegraf` (Kafka→InfluxDB bridge), and `grafana`
 (dashboards).
 
+Run all compose commands from `docker/` so `.env` is picked up and `up`/`down`
+share the same project name. The `cd` jumps there from anywhere in the repo.
+
 ```bash
-source .venv/bin/activate
-docker compose -f docker/docker-compose.yml up -d
+cd "$(git rev-parse --show-toplevel)/docker"
+docker compose up -d
 ```
 
-Confirm all five report `Up`:
+[↳ Back to Samples](#samples)
+
+Confirm the services report `Up`. Note `influx-setup` is a one-shot provisioner
+(creates the downsample buckets/tasks) — it runs once and shows `Exited (0)`,
+which is expected:
 
 ```bash
-docker compose -f docker/docker-compose.yml ps
+cd "$(git rev-parse --show-toplevel)/docker"
+docker compose ps
 ```
 
 If `telegraf` shows `Exited` with a `run out of available brokers` error, it
 started before Kafka was ready. Restart it once Kafka is up:
 
 ```bash
-docker compose -f docker/docker-compose.yml restart telegraf
+cd "$(git rev-parse --show-toplevel)/docker"
+docker compose restart telegraf
 ```
 
 Web endpoints and credentials (from `docker/docker-compose.yml`):
@@ -293,8 +312,8 @@ backend). It runs in the foreground and does not return — run it in its **own
 terminal** and leave it running; stop it later with `Ctrl+C`.
 
 ```bash
+cd "$(git rev-parse --show-toplevel)/backend"
 source .venv/bin/activate
-cd backend
 python3 main.py
 ```
 
@@ -305,7 +324,8 @@ To inspect the raw topic in a separate terminal (`kafkaconsumer.py` has no
 `__main__`, so run the class directly; press `Ctrl+C` to stop it):
 
 ```bash
-cd backend
+cd "$(git rev-parse --show-toplevel)/backend"
+source .venv/bin/activate
 python3 -c "from modules.kafkaconsumer import KafkaConsumerThread; KafkaConsumerThread('gnmi_data', None).run()"
 ```
 
@@ -363,65 +383,44 @@ sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -c 10.0.2.102 -t 60
 
 ## Grafana
 
-Open http://localhost:3000 and log in with `admin` / `admin`.
+The InfluxDB data source and the traffic dashboard are **provisioned
+automatically** at startup — no manual UI clicking. `docker/docker-compose.yml`
+mounts `grafana/provisioning/` into the container and passes the InfluxDB
+org/token/bucket from `docker/.env`:
 
-Add the data source: **Connections → Data sources → Add data source → InfluxDB**.
-Set **Query language** to **Flux** first — the Organization, Token, and Default
-bucket fields only appear after Flux is selected. Then configure:
+- `grafana/provisioning/datasources/influxdb.yml` — InfluxDB data source
+  (Flux, `uid: influxdb`, url `http://influxdb:8086`).
+- `grafana/provisioning/dashboards/dashboards.yml` — file-based dashboard
+  provider.
+- `grafana/provisioning/dashboards/traffic.json` — dashboard **DigSiViz
+  Traffic** with two panels (outbound / inbound bits/s).
 
-- URL: `http://influxdb:8086` (Grafana reaches InfluxDB by container name on the
-  shared Docker network; `http://localhost:8086` works only from the host browser)
-- Organization: `myorg`
-- Token: `mytoken`
-- Default bucket: `infldb`
+Open http://localhost:3000, log in with `admin` / `admin`, and open the
+**DigSiViz Traffic** dashboard. During an iperf3 run the interface carrying the
+traffic spikes; each series is labelled by its `hostname` and `interface_name`
+tags.
 
-Click **Save & test**.
+### The panel queries (reference)
 
-### Build a panel
+The panels run these Flux queries — outbound uses `statistics_out-octets`,
+inbound `statistics_in-octets`:
 
-(Base on [this tutorial](https://docs.influxdata.com/influxdb3/core/visualize-data/grafana/)).
+```flux
+from(bucket: "infldb")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "network_interface")
+  |> filter(fn: (r) => r._field == "statistics_out-octets")
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({r with _value: r._value * 8.0}))
+```
 
-1. **Explore** (left menu), select **influxdb** from the dropdown menu.
-2. Paste the following query:
-
-   ```flux
-   from(bucket: "infldb")
-     |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-     |> filter(fn: (r) => r._measurement == "network_interface")
-     |> filter(fn: (r) => r._field == "statistics_out-octets")
-     |> derivative(unit: 1s, nonNegative: true)
-     |> map(fn: (r) => ({r with _value: r._value * 8.0}))
-   ```
-
-   What each line does:
-   - `range(...)` — limits results to the dashboard's selected time window.
-   - `filter _measurement` — keeps only interface data.
-   - `filter _field` — selects the cumulative "bytes sent" counter.
-   - `derivative(unit: 1s, nonNegative: true)` — turns the ever-increasing
-     counter into a per-second rate (bytes/s) and ignores counter resets.
-   - `map(... * 8.0)` — converts bytes/s to bits/s.
-
-3. Click "Run query".
-
-4. In the **Add** dropdown menu, select **Add to dashboard** and configure how you want it.
-
-5. In the right-hand options, scroll down to **Standard options** and set **Unit** to **Data rate / bits/sec(SI)**.
-
-6. Set the time range (top right) to e.g. **Last 5 minutes** to load data.
-
-   During an iperf3 run, the interface carrying the traffic spikes; each series is labelled by its `hostname` and `interface_name` tags.
-6. Click **Save** (top right) and confirm mark **Update default time range**.
-
-For incoming traffic, repeat the above with `statistics_in-octets`.
-
-   ```flux
-   from(bucket: "infldb")
-     |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-     |> filter(fn: (r) => r._measurement == "network_interface")
-     |> filter(fn: (r) => r._field == "statistics_in-octets")
-     |> derivative(unit: 1s, nonNegative: true)
-     |> map(fn: (r) => ({r with _value: r._value * 8.0}))
-   ```
+What each line does:
+- `range(...)` — limits results to the dashboard's selected time window.
+- `filter _measurement` — keeps only interface data.
+- `filter _field` — selects the cumulative "bytes sent" counter.
+- `derivative(unit: 1s, nonNegative: true)` — turns the ever-increasing counter
+  into a per-second rate (bytes/s) and ignores counter resets.
+- `map(... * 8.0)` — converts bytes/s to bits/s.
 
 [↑ Back to top](#top)
 
@@ -440,8 +439,8 @@ sudo clab destroy -t backend/ma-fp-stumpf.clab.yml
 3) Stop the services (add `-v` to also remove the Grafana volume):
 
 ```bash
-cd "$(git rev-parse --show-toplevel)"
-docker compose -f docker/docker-compose.yml down
+cd "$(git rev-parse --show-toplevel)/docker"
+docker compose down
 ```
 
 InfluxDB has no persistent volume, so its stored metrics are discarded whenever
