@@ -289,13 +289,18 @@ so it cannot be opened in a browser.
 This starts routers `r1`/`r2`/`r3` (SRLinux) and hosts `h1`/`h2`/`h3` (Linux).
 The topology file lives in `backend/`.
 
+> **Skip this if you already deployed the topology for the visualization
+> ([Getting Started](#getting-started)) — it is the same lab.**
+
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 sudo clab deploy -t backend/ma-fp-stumpf.clab.yml
 ```
 
 Confirm all six nodes report `running` (SRLinux needs ~30–60s to become healthy):
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 sudo clab inspect -t backend/ma-fp-stumpf.clab.yml
 ```
 
