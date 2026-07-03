@@ -35,7 +35,7 @@ services:
 
 
   influxdb:
-    image: influxdb:latest
+    image: influxdb:2.7
     container_name: influxdb
     ports:
       - 8086:8086
@@ -43,14 +43,37 @@ services:
       - kafka_network
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: user
-      DOCKER_INFLUXDB_INIT_PASSWORD: password
-      DOCKER_INFLUXDB_INIT_ORG: myorg
-      DOCKER_INFLUXDB_INIT_BUCKET: infldb
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: mytoken
+      DOCKER_INFLUXDB_INIT_USERNAME: ${DOCKER_INFLUXDB_INIT_USERNAME}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${DOCKER_INFLUXDB_INIT_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${DOCKER_INFLUXDB_INIT_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${DOCKER_INFLUXDB_INIT_BUCKET}
+      DOCKER_INFLUXDB_INIT_RETENTION: ${DOCKER_INFLUXDB_INIT_RETENTION}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  influx-setup:
+    image: influxdb:2.7
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    volumes:
+      - ../influxdb/manifest.yml:/manifest.yml:ro
+    entrypoint: >
+      influx apply
+        --host http://influxdb:8086
+        --org ${DOCKER_INFLUXDB_INIT_ORG}
+        --token ${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
+        --file /manifest.yml
+        --force yes
+    networks:
+      - kafka_network
 
   telegraf:
-    image: telegraf:latest
+    image: telegraf:1.30
     container_name: telegraf
     depends_on:
       - influxdb
@@ -65,12 +88,12 @@ services:
     environment:
       HOSTNAME: telegraf
       INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_DB: infldb
-      INFLUXDB_USER: user
-      INFLUXDB_USER_PASSWORD: password
+      INFLUXDB_DB: ${DOCKER_INFLUXDB_INIT_BUCKET}
+      INFLUXDB_USER: ${DOCKER_INFLUXDB_INIT_USERNAME}
+      INFLUXDB_USER_PASSWORD: ${DOCKER_INFLUXDB_INIT_PASSWORD}
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.4.2
     container_name: grafana
     ports:
       - 3000:3000
@@ -78,10 +101,17 @@ services:
       - kafka_network
     volumes:
       - grafana-storage:/var/lib/grafana
+      # Auto-provision datasource + dashboard (mirrors the influxdb manifest
+      # sibling-dir layout). Read-only: files are the source of truth.
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      # Consumed by provisioning/datasources/influxdb.yml via $VAR interpolation.
+      - INFLUX_TOKEN=${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
+      - INFLUX_ORG=${DOCKER_INFLUXDB_INIT_ORG}
+      - INFLUX_BUCKET=${DOCKER_INFLUXDB_INIT_BUCKET}
 
 
 networks:

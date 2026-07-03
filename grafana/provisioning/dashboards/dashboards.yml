@@ -1,0 +1,17 @@
+# Grafana dashboard provider — tells Grafana to load any *.json dashboard in
+# the path below at startup. Loaded from /etc/grafana/provisioning/dashboards/.
+# (Grafana ignores this .yml as a dashboard; it only parses *.json in the path.)
+apiVersion: 1
+
+providers:
+  - name: digsiviz
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    # Re-scan the folder so edits to the JSON on disk show up without a restart.
+    updateIntervalSeconds: 30
+    # Allow saving UI tweaks back (they persist to the volume, not to the file).
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

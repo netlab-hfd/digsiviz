@@ -7,6 +7,14 @@ name: ma-fp-stumpf
 
 topology:
 
+  defaults:
+    # "no": clab starts nodes on deploy, but Docker never auto-restarts them on
+    # crash/reboot (linux hosts otherwise default to "always"). Preferred for
+    # measurement — a restart resets interface counters and corrupts rate data.
+    # Use "on-failure" only for long unattended runs (also restarts on boot).
+    # Quote "no" — bare no is YAML boolean false.
+    restart-policy: "no"
+
   kinds:
     linux:
       image: wbitt/network-multitool:alpine-extra
