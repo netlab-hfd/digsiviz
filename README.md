@@ -23,6 +23,7 @@ layer and gNMI for realtime data retrieval.
   - [Verify InfluxDB](#verify-influxdb)
   - [Saturation test (iperf3)](#saturation-test-iperf3)
   - [Grafana](#grafana)
+  - [Historical backfill (time-machine test)](#historical-backfill-time-machine-test)
   - [Teardown](#teardown)
 
 ---
@@ -384,6 +385,21 @@ Run the client on `h1` for 60s:
 sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -c 10.0.2.102 -t 60
 ```
 
+### Steady load with UDP
+
+The TCP test above sawtooths (bursts then `0.00 Bytes` intervals) on a lossy
+path: TCP interprets loss as congestion and backs off — by design. For a
+**steady, controllable** offered load where every interval transfers, use UDP
+with a target bitrate (`-u -b`). UDP does not back off, so it holds the rate:
+
+```bash
+sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -u -c 10.0.2.102 -b 100M -t 20
+```
+
+The receiver line reports loss %, revealing the link's clean ceiling. This same
+`-b <bitrate>` mechanism is how recorded traffic is **replayed** into the twin
+(read a stored bitrate from InfluxDB, drive `iperf3 -u -b <that rate>`).
+
 [↑ Back to top](#top)
 
 ## Grafana
@@ -407,25 +423,95 @@ tags.
 
 ### The panel queries (reference)
 
-The panels run these Flux queries — outbound uses `statistics_out-octets`,
-inbound `statistics_in-octets`:
+Each panel **unions the live raw bucket (`infldb`) with all 12 downsample
+tiers** so one panel shows the full time machine: fine detail for recent data,
+coarse aggregates for old data. Outbound uses `statistics_out-octets`, inbound
+`statistics_in-octets`:
 
 ```flux
-from(bucket: "infldb")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "network_interface")
-  |> filter(fn: (r) => r._field == "statistics_out-octets")
+union(tables: [
+  from(bucket: "infldb")     |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "network_interface") |> filter(fn: (r) => r._field == "statistics_out-octets") |> set(key: "tier", value: "raw"),
+  from(bucket: "traffic-1m") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "network_interface") |> filter(fn: (r) => r._field == "statistics_out-octets") |> set(key: "tier", value: "1m"),
+  // ... one row per tier: 5m, 1h, 8h, 1d, 1w, 4w, 12w, 24w, 52w, 260w, 520w
+])
+  |> group(columns: ["hostname", "interface_name", "_field", "tier"])
+  |> sort(columns: ["_time"])
   |> derivative(unit: 1s, nonNegative: true)
   |> map(fn: (r) => ({r with _value: r._value * 8.0}))
 ```
 
 What each line does:
-- `range(...)` — limits results to the dashboard's selected time window.
-- `filter _measurement` — keeps only interface data.
-- `filter _field` — selects the cumulative "bytes sent" counter.
-- `derivative(unit: 1s, nonNegative: true)` — turns the ever-increasing counter
-  into a per-second rate (bytes/s) and ignores counter resets.
+- `union(...)` — merges the raw bucket and every tier into one stream. Each
+  source is tagged with a `tier` label via `set(...)`.
+- `filter _measurement` / `filter _field` — keep only interface data and select
+  the cumulative "bytes sent" counter.
+- `group(... "tier")` — keeps each tier a **separate series**, so `derivative`
+  never spans two buckets (their counters have independent baselines) and each
+  resolution is its own line.
+- `sort` + `derivative(unit: 1s, nonNegative: true)` — turn each
+  ever-increasing counter into a per-second rate (bytes/s), ignoring resets.
 - `map(... * 8.0)` — converts bytes/s to bits/s.
+
+> The full 13-line union is generated, not hand-typed — see
+> `grafana/provisioning/dashboards/traffic.json`.
+
+[↑ Back to top](#top)
+
+## Historical backfill (time-machine test)
+
+The downsample **tasks only process recent data going forward**, and the raw
+`infldb` bucket retains only ~1h. They will never build up years of history on
+their own. To test that the tier buckets and the Grafana time machine actually
+render multi-year data, seed the tiers with synthetic backdated points using
+`influxdb/backfill.py`:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/influxdb"
+python3 backfill.py
+```
+
+What it does:
+- Writes synthetic cumulative-counter points **directly into each tier bucket**
+  (bypassing the cascade), backdated across that tier's own retention window at
+  its own resolution. The multi-year span comes from the coarse buckets
+  (`traffic-52w`, `-260w`, `-520w`), which have multi-year retention.
+- Each point must fall **inside** the bucket's retention window — a point on the
+  exact lower bound is rejected, so the oldest point is placed one step in.
+- Uses the live schema (`network_interface` measurement, `statistics_out-octets`
+  / `statistics_in-octets` base fields) so the Grafana panels render it
+  unchanged. It is a mechanics test of the buckets + time machine, **not** the
+  research pipeline. Re-running overwrites (idempotent).
+
+Verify it worked:
+
+```bash
+# any tier has data spanning years:
+docker exec influxdb influx query 'from(bucket:"traffic-52w") |> range(start:-15y) |> count()' --org myorg --token mytoken
+```
+
+Then open the **DigSiViz Traffic** dashboard (defaults to a `now-5y` window):
+recent time shows the dense `raw`/`1m` series, older time shows the sparse
+coarse tiers — the granularity design made visible.
+
+> **Note:** `influx apply` (re)creating buckets **clears their data**. If you
+> re-provision the manifest, re-run `backfill.py` afterwards.
+
+### Regenerating the downsample manifest
+
+`influxdb/manifest.yml` (buckets + downsample tasks) is **generated**, not
+hand-edited — hand-maintaining 12+ near-identical Flux blocks is error-prone.
+Edit the tier table or aggregate list in `influxdb/generate_manifest.py` and
+regenerate:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/influxdb"
+python3 generate_manifest.py       # rewrites manifest.yml
+```
+
+Each tier stores `mean`, `min`, `max` and `median` as separate field suffixes
+(`statistics_out-octets_mean`, `_min`, `_max`, `_median`). `min`/`max` cascade
+exactly across tiers, `mean` approximately, and `median`-of-medians is an
+approximation.
 
 [↑ Back to top](#top)
 
