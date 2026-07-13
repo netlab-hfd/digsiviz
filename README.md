@@ -417,42 +417,54 @@ org/token/bucket from `docker/.env`:
   Traffic** with two panels (outbound / inbound bits/s).
 
 Open http://localhost:3000, log in with `admin` / `admin`, and open the
-**DigSiViz Traffic** dashboard. During an iperf3 run the interface carrying the
-traffic spikes; each series is labelled by its `hostname` and `interface_name`
-tags.
+**DigSiViz Traffic** dashboard. It has **two rows, because live and historical
+data come from different sources**:
+
+- **Live (top row)** — reads the raw `infldb` bucket, pinned to the last 15m
+  (panel `timeFrom`), regardless of the dashboard time range. This is the
+  current per-second traffic; spikes during an `iperf3` run.
+- **Time machine (bottom row)** — reads the 12 downsample tier buckets, one
+  series per tier, over the dashboard time range (defaults to `now-5y`). Recent
+  data is dense (fine tiers), old data is coarse (`52w`/`260w`/`520w`).
+
+Each series is labelled by its `hostname`/`interface_name` (and `tier` on the
+time-machine panels).
 
 ### The panel queries (reference)
 
-Each panel **unions the live raw bucket (`infldb`) with all 12 downsample
-tiers** so one panel shows the full time machine: fine detail for recent data,
-coarse aggregates for old data. Outbound uses `statistics_out-octets`, inbound
-`statistics_in-octets`:
+**Live panels** read one bucket and derive a rate:
+
+```flux
+from(bucket: "infldb")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "network_interface")
+  |> filter(fn: (r) => r._field == "statistics_out-octets")
+  |> group(columns: ["hostname", "interface_name"])
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({r with _value: r._value * 8.0}))
+```
+
+**Time-machine panels** union all 12 tier buckets (not the raw bucket), tagging
+each with a `tier` so `derivative` never spans two buckets (their counters have
+independent baselines):
 
 ```flux
 union(tables: [
-  from(bucket: "infldb")     |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "network_interface") |> filter(fn: (r) => r._field == "statistics_out-octets") |> set(key: "tier", value: "raw"),
   from(bucket: "traffic-1m") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "network_interface") |> filter(fn: (r) => r._field == "statistics_out-octets") |> set(key: "tier", value: "1m"),
   // ... one row per tier: 5m, 1h, 8h, 1d, 1w, 4w, 12w, 24w, 52w, 260w, 520w
 ])
-  |> group(columns: ["hostname", "interface_name", "_field", "tier"])
+  |> group(columns: ["hostname", "interface_name", "tier"])
   |> sort(columns: ["_time"])
   |> derivative(unit: 1s, nonNegative: true)
   |> map(fn: (r) => ({r with _value: r._value * 8.0}))
 ```
 
-What each line does:
-- `union(...)` — merges the raw bucket and every tier into one stream. Each
-  source is tagged with a `tier` label via `set(...)`.
-- `filter _measurement` / `filter _field` — keep only interface data and select
-  the cumulative "bytes sent" counter.
-- `group(... "tier")` — keeps each tier a **separate series**, so `derivative`
-  never spans two buckets (their counters have independent baselines) and each
-  resolution is its own line.
-- `sort` + `derivative(unit: 1s, nonNegative: true)` — turn each
-  ever-increasing counter into a per-second rate (bytes/s), ignoring resets.
-- `map(... * 8.0)` — converts bytes/s to bits/s.
+Common lines: `filter` keeps interface data and the cumulative "bytes sent"
+counter; `derivative(unit: 1s, nonNegative: true)` turns it into bytes/s,
+ignoring resets; `map(... * 8.0)` converts to bits/s. Outbound uses
+`statistics_out-octets`, inbound `statistics_in-octets`.
 
-> The full 13-line union is generated, not hand-typed — see
+> Both panel queries are generated, not hand-typed — see
 > `grafana/provisioning/dashboards/traffic.json`.
 
 [↑ Back to top](#top)

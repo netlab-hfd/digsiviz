@@ -27,7 +27,7 @@
         "type": "influxdb",
         "uid": "influxdb"
       },
-      "description": "Per-second outbound rate (bits/s) derived from the cumulative statistics_out-octets counter. Each series is one interface, tagged by hostname and interface_name.",
+      "description": "Live per-second outbound rate from the raw infldb bucket (last 15m).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -102,19 +102,20 @@
             "type": "influxdb",
             "uid": "influxdb"
           },
-          "query": "union(tables: [\n  from(bucket: \"infldb\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"raw\"),\n  from(bucket: \"traffic-1m\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"1m\"),\n  from(bucket: \"traffic-5m\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"5m\"),\n  from(bucket: \"traffic-1h\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"1h\"),\n  from(bucket: \"traffic-8h\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"8h\"),\n  from(bucket: \"traffic-1d\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"1d\"),\n  from(bucket: \"traffic-1w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"1w\"),\n  from(bucket: \"traffic-4w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"4w\"),\n  from(bucket: \"traffic-12w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"12w\"),\n  from(bucket: \"traffic-24w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"24w\"),\n  from(bucket: \"traffic-52w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"52w\"),\n  from(bucket: \"traffic-260w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"260w\"),\n  from(bucket: \"traffic-520w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"520w\")\n])\n  |> group(columns: [\"hostname\", \"interface_name\", \"_field\", \"tier\"])\n  |> sort(columns: [\"_time\"])\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({r with _value: r._value * 8.0}))",
+          "query": "from(bucket: \"infldb\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"network_interface\")\n  |> filter(fn: (r) => r._field == \"statistics_out-octets\")\n  |> group(columns: [\"hostname\", \"interface_name\"])\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({r with _value: r._value * 8.0}))",
           "refId": "A"
         }
       ],
-      "title": "Outbound traffic (bits/s)",
-      "type": "timeseries"
+      "title": "Live outbound (bits/s)",
+      "type": "timeseries",
+      "timeFrom": "15m"
     },
     {
       "datasource": {
         "type": "influxdb",
         "uid": "influxdb"
       },
-      "description": "Per-second inbound rate (bits/s) derived from the cumulative statistics_in-octets counter. Each series is one interface, tagged by hostname and interface_name.",
+      "description": "Live per-second inbound rate from the raw infldb bucket (last 15m).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -189,15 +190,190 @@
             "type": "influxdb",
             "uid": "influxdb"
           },
-          "query": "union(tables: [\n  from(bucket: \"infldb\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"raw\"),\n  from(bucket: \"traffic-1m\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"1m\"),\n  from(bucket: \"traffic-5m\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"5m\"),\n  from(bucket: \"traffic-1h\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"1h\"),\n  from(bucket: \"traffic-8h\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"8h\"),\n  from(bucket: \"traffic-1d\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"1d\"),\n  from(bucket: \"traffic-1w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"1w\"),\n  from(bucket: \"traffic-4w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"4w\"),\n  from(bucket: \"traffic-12w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"12w\"),\n  from(bucket: \"traffic-24w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"24w\"),\n  from(bucket: \"traffic-52w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"52w\"),\n  from(bucket: \"traffic-260w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"260w\"),\n  from(bucket: \"traffic-520w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"520w\")\n])\n  |> group(columns: [\"hostname\", \"interface_name\", \"_field\", \"tier\"])\n  |> sort(columns: [\"_time\"])\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({r with _value: r._value * 8.0}))",
+          "query": "from(bucket: \"infldb\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"network_interface\")\n  |> filter(fn: (r) => r._field == \"statistics_in-octets\")\n  |> group(columns: [\"hostname\", \"interface_name\"])\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({r with _value: r._value * 8.0}))",
           "refId": "A"
         }
       ],
-      "title": "Inbound traffic (bits/s)",
+      "title": "Live inbound (bits/s)",
+      "type": "timeseries",
+      "timeFrom": "15m"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb"
+      },
+      "description": "Outbound rate from the 12 downsample tier buckets, one series per tier. Uses the dashboard time range (default now-5y).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb"
+          },
+          "query": "union(tables: [\n  from(bucket: \"traffic-1m\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"1m\"),\n  from(bucket: \"traffic-5m\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"5m\"),\n  from(bucket: \"traffic-1h\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"1h\"),\n  from(bucket: \"traffic-8h\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"8h\"),\n  from(bucket: \"traffic-1d\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"1d\"),\n  from(bucket: \"traffic-1w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"1w\"),\n  from(bucket: \"traffic-4w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"4w\"),\n  from(bucket: \"traffic-12w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"12w\"),\n  from(bucket: \"traffic-24w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"24w\"),\n  from(bucket: \"traffic-52w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"52w\"),\n  from(bucket: \"traffic-260w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"260w\"),\n  from(bucket: \"traffic-520w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_out-octets\") |> set(key: \"tier\", value: \"520w\")\n])\n  |> group(columns: [\"hostname\", \"interface_name\", \"tier\"])\n  |> sort(columns: [\"_time\"])\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({r with _value: r._value * 8.0}))",
+          "refId": "A"
+        }
+      ],
+      "title": "Time machine \u2014 outbound (downsampled tiers)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb"
+      },
+      "description": "Inbound rate from the 12 downsample tier buckets, one series per tier. Uses the dashboard time range (default now-5y).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb"
+          },
+          "query": "union(tables: [\n  from(bucket: \"traffic-1m\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"1m\"),\n  from(bucket: \"traffic-5m\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"5m\"),\n  from(bucket: \"traffic-1h\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"1h\"),\n  from(bucket: \"traffic-8h\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"8h\"),\n  from(bucket: \"traffic-1d\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"1d\"),\n  from(bucket: \"traffic-1w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"1w\"),\n  from(bucket: \"traffic-4w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"4w\"),\n  from(bucket: \"traffic-12w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"12w\"),\n  from(bucket: \"traffic-24w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"24w\"),\n  from(bucket: \"traffic-52w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"52w\"),\n  from(bucket: \"traffic-260w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"260w\"),\n  from(bucket: \"traffic-520w\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"network_interface\") |> filter(fn: (r) => r._field == \"statistics_in-octets\") |> set(key: \"tier\", value: \"520w\")\n])\n  |> group(columns: [\"hostname\", \"interface_name\", \"tier\"])\n  |> sort(columns: [\"_time\"])\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({r with _value: r._value * 8.0}))",
+          "refId": "A"
+        }
+      ],
+      "title": "Time machine \u2014 inbound (downsampled tiers)",
       "type": "timeseries"
     }
   ],
-  "refresh": "",
+  "refresh": "10s",
   "schemaVersion": 39,
   "tags": [
     "digsiviz",
