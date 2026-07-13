@@ -423,9 +423,11 @@ data come from different sources**:
 - **Live (top row)** — reads the raw `infldb` bucket, pinned to the last 15m
   (panel `timeFrom`), regardless of the dashboard time range. This is the
   current per-second traffic; spikes during an `iperf3` run.
-- **Time machine (bottom row)** — reads the 12 downsample tier buckets, one
-  series per tier, over the dashboard time range (defaults to `now-5y`). Recent
-  data is dense (fine tiers), old data is coarse (`52w`/`260w`/`520w`).
+- **Time machine (bottom row)** — reads the 12 downsample tier buckets over the
+  dashboard time range (defaults to `now-5y`), drawn as **bars** (each bar = the
+  downsampled average for that window — more honest than a line between points
+  years apart). The **Tier** dropdown at the top of the dashboard filters to a
+  single bucket (e.g. `12w` for the 3-month tier) or `all`.
 
 Each series is labelled by its `hostname`/`interface_name` (and `tier` on the
 time-machine panels).
