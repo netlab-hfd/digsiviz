@@ -24,6 +24,23 @@ MEASUREMENT = "network_interface"
 BASE_FIELDS = ["statistics_out-octets", "statistics_in-octets"]
 AGGS = ["mean", "min", "max", "median"]  # suffix == flux aggregate fn name
 
+# Delay each task's execution past the ingestion lag, WITHOUT shifting the
+# window it reads: InfluxDB keeps a task's `now()` pinned to its scheduled time
+# and only defers when the task actually runs, so `range(start: -task.every)`
+# still covers the intended window.
+#
+# WHY: telegraf.conf sets no flush_interval, so Telegraf batches at its 10s
+# default. A task firing exactly on the window boundary therefore reads a
+# window whose last few seconds have not been written yet (measured lag
+# oscillates ~1.6-7.5s). Every tier point was being computed from a truncated
+# window — for the 1m tier, up to ~17% of the window missing, biasing
+# mean/min/max/median. Verified by verify_counter_aggregation.py: tier `max`
+# consistently sat below the window's true last counter value.
+#
+# 30s > the observed lag with margin, and stays below the smallest tier's
+# 1m `every`.
+OFFSET = "30s"
+
 # (tier_name, every, retention_seconds, retention_comment)
 TIERS = [
     ("1m",   "1m",   3600,      "floored to InfluxDB 1h minimum (2x rule -> 600s, rejected)"),
@@ -97,6 +114,7 @@ spec:
   name: downsample-raw-to-{name}
   description: Downsamples raw {RAW_BUCKET} to {name} mean/min/max/median.
   every: {every}
+  offset: {OFFSET}
   query: |
 
     data = from(bucket: "{RAW_BUCKET}")
@@ -130,6 +148,7 @@ spec:
   name: downsample-{prev}-to-{name}
   description: Downsamples the {prev} tier to {name} (mean/min/max/median cascade).
   every: {every}
+  offset: {OFFSET}
   query: |
 
     src = from(bucket: "traffic-{prev}")

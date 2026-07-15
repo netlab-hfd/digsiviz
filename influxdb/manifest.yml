@@ -32,6 +32,7 @@ spec:
   name: downsample-raw-to-1m
   description: Downsamples raw infldb to 1m mean/min/max/median.
   every: 1m
+  offset: 30s
   query: |
 
     data = from(bucket: "infldb")
@@ -80,6 +81,7 @@ spec:
   name: downsample-1m-to-5m
   description: Downsamples the 1m tier to 5m (mean/min/max/median cascade).
   every: 5m
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-1m")
@@ -127,6 +129,7 @@ spec:
   name: downsample-5m-to-1h
   description: Downsamples the 5m tier to 1h (mean/min/max/median cascade).
   every: 1h
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-5m")
@@ -174,6 +177,7 @@ spec:
   name: downsample-1h-to-8h
   description: Downsamples the 1h tier to 8h (mean/min/max/median cascade).
   every: 8h
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-1h")
@@ -221,6 +225,7 @@ spec:
   name: downsample-8h-to-1d
   description: Downsamples the 8h tier to 1d (mean/min/max/median cascade).
   every: 1d
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-8h")
@@ -268,6 +273,7 @@ spec:
   name: downsample-1d-to-1w
   description: Downsamples the 1d tier to 1w (mean/min/max/median cascade).
   every: 1w
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-1d")
@@ -315,6 +321,7 @@ spec:
   name: downsample-1w-to-4w
   description: Downsamples the 1w tier to 4w (mean/min/max/median cascade).
   every: 4w
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-1w")
@@ -362,6 +369,7 @@ spec:
   name: downsample-4w-to-12w
   description: Downsamples the 4w tier to 12w (mean/min/max/median cascade).
   every: 12w
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-4w")
@@ -409,6 +417,7 @@ spec:
   name: downsample-12w-to-24w
   description: Downsamples the 12w tier to 24w (mean/min/max/median cascade).
   every: 24w
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-12w")
@@ -456,6 +465,7 @@ spec:
   name: downsample-24w-to-52w
   description: Downsamples the 24w tier to 52w (mean/min/max/median cascade).
   every: 52w
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-24w")
@@ -503,6 +513,7 @@ spec:
   name: downsample-52w-to-260w
   description: Downsamples the 52w tier to 260w (mean/min/max/median cascade).
   every: 260w
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-52w")
@@ -550,6 +561,7 @@ spec:
   name: downsample-260w-to-520w
   description: Downsamples the 260w tier to 520w (mean/min/max/median cascade).
   every: 520w
+  offset: 30s
   query: |
 
     src = from(bucket: "traffic-260w")
