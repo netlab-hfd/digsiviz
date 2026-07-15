@@ -93,7 +93,7 @@ services:
       INFLUXDB_USER_PASSWORD: ${DOCKER_INFLUXDB_INIT_PASSWORD}
 
   grafana:
-    image: grafana/grafana:10.4.2
+    image: grafana/grafana:13.0.3
     container_name: grafana
     ports:
       - 3000:3000
@@ -108,6 +108,10 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      # Topology weathermap + time slider (the DigSiViz time machine).
+      # SYNC so the plugin is present before dashboards provision; GF_INSTALL_PLUGINS
+      # is deprecated as of Grafana 11.
+      - GF_PLUGINS_PREINSTALL_SYNC=andrewbmchugh-flow-panel
       # Consumed by provisioning/datasources/influxdb.yml via $VAR interpolation.
       - INFLUX_TOKEN=${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
       - INFLUX_ORG=${DOCKER_INFLUXDB_INIT_ORG}

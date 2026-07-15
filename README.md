@@ -404,9 +404,9 @@ The receiver line reports loss %, revealing the link's clean ceiling. This same
 
 ## Grafana
 
-The InfluxDB data source and the traffic dashboard are **provisioned
-automatically** at startup — no manual UI clicking. `docker/docker-compose.yml`
-mounts `grafana/provisioning/` into the container and passes the InfluxDB
+The InfluxDB data source and the dashboards are **provisioned automatically** at
+startup — no manual UI clicking. `docker/docker-compose.yml` mounts
+`grafana/provisioning/` into the container and passes the InfluxDB
 org/token/bucket from `docker/.env`:
 
 - `grafana/provisioning/datasources/influxdb.yml` — InfluxDB data source
@@ -414,7 +414,29 @@ org/token/bucket from `docker/.env`:
 - `grafana/provisioning/dashboards/dashboards.yml` — file-based dashboard
   provider.
 - `grafana/provisioning/dashboards/traffic.json` — dashboard **DigSiViz
-  Traffic** with two panels (outbound / inbound bits/s).
+  Traffic**: live + time-machine time series.
+- `grafana/provisioning/dashboards/topology.json` — dashboard **DigSiViz
+  Topology**: the flow-panel weathermap (see below). **Generated** — do not
+  hand-edit.
+
+Two pieces of Grafana config make the historical buckets viewable, and both are
+in the compose file rather than the UI:
+
+- **`GF_PLUGINS_PREINSTALL_SYNC=andrewbmchugh-flow-panel`** — installs the flow
+  panel at boot. `SYNC` matters: the plugin must exist *before* dashboards
+  provision, or `topology.json` references a panel type Grafana does not have
+  yet. (`GF_INSTALL_PLUGINS` is the deprecated spelling, removed guidance as of
+  Grafana 11.)
+- **`INFLUX_TOKEN` / `INFLUX_ORG` / `INFLUX_BUCKET`** — passed from `docker/.env`
+  and interpolated into the datasource YAML, so no credentials are committed.
+
+> **Grafana version policy.** Pinned to an exact tag (`grafana/grafana:13.0.3`),
+> never `latest` — but pinned to the *newest that works*, not frozen. Because the
+> datasource and dashboards are provisioned from files, the `grafana-storage`
+> volume is disposable, which makes a version bump cheap to test and cheap to
+> undo. Verified on 13.0.3: DB migration, Flux queries, provisioning, plugin
+> install. (Flux is **not** deprecated in Grafana — InfluxData deprecated Flux in
+> InfluxDB 3.x, which does not affect Grafana against InfluxDB 2.x.)
 
 Open http://localhost:3000, log in with `admin` / `admin`, and open the
 **DigSiViz Traffic** dashboard. It has **two rows, because live and historical
@@ -471,6 +493,81 @@ ignoring resets; `map(... * 8.0)` converts to bits/s. Outbound uses
 
 [↑ Back to top](#top)
 
+## Topology weathermap + time slider (flow panel)
+
+The **DigSiViz Topology** dashboard renders the clab topology as a weathermap:
+each link is coloured and labelled by the outbound bit rate of its router-side
+interface, and a built-in **time slider** scrubs the whole topology through the
+dashboard's time range. Combined with the **Granularity tier** dropdown, this is
+the DigSiViz time machine — and, pointed at a coarse tier bucket, a time machine
+over years.
+
+The approach is modelled on Nokia's reference telemetry lab,
+[`srl-labs/srl-telemetry-lab`](https://github.com/srl-labs/srl-telemetry-lab),
+which drives the same
+[`andrewbmchugh-flow-panel`](https://grafana.com/grafana/plugins/andrewbmchugh-flow-panel/)
+plugin from SRLinux telemetry. Two differences worth knowing:
+
+- Nokia feeds the panel from **Prometheus** (via gnmic); this repo feeds it from
+  **InfluxDB/Flux**. The plugin is datasource-agnostic — see the naming note
+  below. No Prometheus is required.
+- Nokia queries `interface_traffic_rate_out_bps`, a **device-computed rate**
+  exposed by SRLinux over gNMI. This repo polls `statistics_out-octets`, a
+  **cumulative counter**, and derives the rate. The two are *not* equivalent
+  under downsampling (mean-of-rates ≠ derivative-of-mean-of-counters).
+
+### How the data reaches the drawing
+
+The panel binds a query series to an SVG element by **name**: each cell in the
+panelConfig declares a `dataRef`, which must equal the series name Grafana hands
+the plugin.
+
+Grafana presents Flux results as an *unnamed* frame whose `_value` field carries
+the tags as **labels** — so the plugin would see `_value {hostname="r1", …}`,
+which is useless as a `dataRef`. The fix is Flux-side, no panel override needed:
+`pivot()` turns each series into its own **named column**, and Grafana names
+fields after columns.
+
+```flux
+  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0,
+                      name: r.hostname + ":" + r.interface_name + ":out"}))
+  |> group()
+  |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")
+```
+
+This yields fields named exactly `r1:ethernet-1/1:out`, which is what the
+generated panelConfig references.
+
+### Regenerating the weathermap
+
+The SVG, the panelConfig and the dashboard are all **generated from the clab
+topology file**, so the drawing cannot drift from the lab that is actually
+deployed:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/grafana/flow"
+python3 generate_flow.py     # rewrites topology.svg, panelconfig.yml,
+                             # and ../provisioning/dashboards/topology.json
+docker compose -f ../../docker/docker-compose.yml restart grafana
+```
+
+- Node positions live in the `POS` table in `generate_flow.py`; everything else
+  (nodes, links, interface names) is read from `backend/ma-fp-stumpf.clab.yml`.
+- Each physical link is drawn as **two half-lines**, one per direction, each
+  bound to that endpoint's `:out` rate — link utilisation is directional.
+- Only SRLinux routers stream gNMI, so **host-side half-links are drawn but not
+  data-bound** (they render in a dimmer grey). 9 cells are driven: 3 router↔router
+  links × 2 directions, plus 3 router→host links.
+- The SVG and panelConfig are **inlined** into `topology.json` (the panel accepts
+  content or a URL), so the dashboard renders with no network access. Nokia's lab
+  fetches them from raw.githubusercontent instead.
+- A label only works if a `<text>` element **already exists** in the cell — the
+  label drive rewrites existing text, it never creates it.
+- Traffic colour thresholds (`THRESHOLDS` in the generator) are calibrated for
+  this lab and should be revisited once the steady-load rate is settled.
+
+[↑ Back to top](#top)
+
 ## Historical backfill (time-machine test)
 
 The downsample **tasks only process recent data going forward**, and the raw
@@ -507,8 +604,31 @@ Then open the **DigSiViz Traffic** dashboard (defaults to a `now-5y` window):
 recent time shows the dense `raw`/`1m` series, older time shows the sparse
 coarse tiers — the granularity design made visible.
 
-> **Note:** `influx apply` (re)creating buckets **clears their data**. If you
-> re-provision the manifest, re-run `backfill.py` afterwards.
+### How the buckets get emptied (and how to refill them)
+
+There are two independent ways to lose the contents of the tier buckets. Both are
+easy to trigger by accident, and the fix for both is to re-run `backfill.py`.
+
+1. **`influx apply` recreating a bucket clears it.** Re-running the manifest
+   *unchanged* is safe — `influx-setup` runs on every `docker compose up` and
+   does nothing when nothing changed. But any manifest edit that touches a bucket
+   spec recreates that bucket and drops its data. Re-run `backfill.py` after
+   re-provisioning.
+2. **The `influxdb` service has no named volume.** Only `grafana-storage` is
+   declared, so *all* InfluxDB data lives in the container's writable layer. This
+   means a plain `docker compose down` — **no `-v` required** — destroys every
+   bucket. `docker compose restart` and `stop`/`start` are safe; anything that
+   *removes* the container is not.
+
+```bash
+# refill after either of the above
+cd "$(git rev-parse --show-toplevel)/influxdb"
+python3 backfill.py
+```
+
+Note also that `DOCKER_INFLUXDB_INIT_RETENTION` (the raw `infldb` retention) only
+applies at **init**, so changing it needs a volume wipe (`docker compose down -v`)
+rather than a restart — which in turn empties the tiers, per (2).
 
 ### Regenerating the downsample manifest
 
