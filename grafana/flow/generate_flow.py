@@ -66,6 +66,12 @@ POS = {
 BOX_W, BOX_H = 92, 44
 CANVAS = (800, 600)
 
+# Window the counter is collapsed onto before the rate is derived. See
+# flux_query() for why this is required rather than cosmetic. Too small and the
+# weathermap reads 0 between counter steps; too large and short bursts are
+# averaged away. 10s is a compromise for a live view.
+RATE_WINDOW = "10s"
+
 # Traffic thresholds in bits/s, driving link stroke colour.
 # NOTE: calibrated for this lab (iperf3 saturation reaches ~70 Mbit/s over veth).
 # Nokia's reference lab uses 200k/500k/1M/5M because it paces traffic to
@@ -230,6 +236,21 @@ def flux_query():
     The _field filter accepts both the raw/backfill name and the cascade's
     `_mean` suffix so one query serves every bucket. A bucket holding *both*
     would collide in pivot(); in practice a bucket has one or the other.
+
+    aggregateWindow(fn: last) before derivative() is load-bearing, for two
+    reasons that only show up on the weathermap:
+      1. out-octets is a *step function* at low rates -- the counter sits still
+         for seconds at a time. Differentiating consecutive 0.5s samples
+         therefore yields 0 for most samples, with occasional spikes. A time
+         series panel hides this (you see the spikes among 1800 plotted points),
+         but the flow panel renders ONE instant at the time-slider position, so
+         it would read 0 almost always.
+      2. the raw bucket contains duplicate points (same value, timestamps
+         microseconds apart). Differentiating across a duplicate pair gives a
+         ~0 delta over a ~0 interval. `last` collapses each window to one value.
+    Collapsing to a regular grid first makes the delta meaningful. On the coarse
+    tier buckets this is effectively a no-op -- their points are already further
+    apart than the window.
     """
     return (
         'from(bucket: "${bucket}")\n'
@@ -238,12 +259,42 @@ def flux_query():
         '  |> filter(fn: (r) => r._field == "statistics_out-octets" or '
         'r._field == "statistics_out-octets_mean")\n'
         '  |> group(columns: ["hostname", "interface_name"])\n'
-        '  |> sort(columns: ["_time"])\n'
+        f"  |> aggregateWindow(every: {RATE_WINDOW}, fn: last, createEmpty: false)\n"
         "  |> derivative(unit: 1s, nonNegative: true)\n"
         "  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0,\n"
         '                      name: r.hostname + ":" + r.interface_name + ":out"}))\n'
         "  |> group()\n"
         '  |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")'
+    )
+
+
+def activity_query():
+    """Busiest interface at each instant -- a 'where is the traffic' strip.
+
+    The flow panel renders one instant (the time-slider position), so finding a
+    burst by dragging blind is painful. This companion panel shares the dashboard
+    time range, so peaks here line up horizontally with slider positions above:
+    look for a bar, drag the slider to it.
+
+    max() across interfaces rather than sum(), so a single busy link still shows
+    at full height instead of being diluted by idle ones.
+    """
+    return (
+        'from(bucket: "${bucket}")\n'
+        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+        '  |> filter(fn: (r) => r._measurement == "network_interface")\n'
+        '  |> filter(fn: (r) => r._field == "statistics_out-octets" or '
+        'r._field == "statistics_out-octets_mean")\n'
+        '  |> group(columns: ["hostname", "interface_name"])\n'
+        f"  |> aggregateWindow(every: {RATE_WINDOW}, fn: last, createEmpty: false)\n"
+        "  |> derivative(unit: 1s, nonNegative: true)\n"
+        "  |> map(fn: (r) => ({r with _value: r._value * 8.0}))\n"
+        '  |> group(columns: ["_time"])\n'
+        '  |> max()\n'
+        "  |> group()\n"
+        '  |> sort(columns: ["_time"])\n'
+        '  |> keep(columns: ["_time", "_value"])\n'
+        '  |> rename(columns: {_value: "busiest link"})'
     )
 
 
@@ -290,7 +341,55 @@ def build_dashboard(svg, cfg):
                     },
                 },
                 "targets": [{"datasource": ds, "query": flux_query(), "refId": "A"}],
-            }
+            },
+            {
+                "type": "timeseries",
+                "title": "Where is the traffic? — busiest link over time (drag the slider above to a peak)",
+                "description": (
+                    "Shares the dashboard time range with the weathermap above, so "
+                    "peaks here line up with time-slider positions. At idle the "
+                    "counter is a step function, so the weathermap reads 0 between "
+                    "steps — use this strip to find the bursts."
+                ),
+                "datasource": ds,
+                "gridPos": {"h": 6, "w": 24, "x": 0, "y": 18},
+                "id": 2,
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {"mode": "fixed", "fixedColor": "orange"},
+                        "custom": {
+                            "drawStyle": "bars",
+                            "fillOpacity": 70,
+                            "lineWidth": 1,
+                            "pointSize": 4,
+                            "showPoints": "auto",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "gradientMode": "none",
+                            "scaleDistribution": {"type": "linear"},
+                            "stacking": {"group": "A", "mode": "none"},
+                            "thresholdsStyle": {"mode": "off"},
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [{"color": "green", "value": None}],
+                        },
+                        "unit": "bps",
+                    },
+                    "overrides": [],
+                },
+                "options": {
+                    "legend": {
+                        "calcs": ["max"],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": True,
+                    },
+                    "tooltip": {"mode": "single", "sort": "none"},
+                },
+                "targets": [{"datasource": ds, "query": activity_query(), "refId": "A"}],
+            },
         ],
         "refresh": "10s",
         "schemaVersion": 39,

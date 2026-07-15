@@ -46,7 +46,87 @@
             "type": "influxdb",
             "uid": "influxdb"
           },
-          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"network_interface\")\n  |> filter(fn: (r) => r._field == \"statistics_out-octets\" or r._field == \"statistics_out-octets_mean\")\n  |> group(columns: [\"hostname\", \"interface_name\"])\n  |> sort(columns: [\"_time\"])\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0,\n                      name: r.hostname + \":\" + r.interface_name + \":out\"}))\n  |> group()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"name\"], valueColumn: \"_value\")",
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"network_interface\")\n  |> filter(fn: (r) => r._field == \"statistics_out-octets\" or r._field == \"statistics_out-octets_mean\")\n  |> group(columns: [\"hostname\", \"interface_name\"])\n  |> aggregateWindow(every: 10s, fn: last, createEmpty: false)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0,\n                      name: r.hostname + \":\" + r.interface_name + \":out\"}))\n  |> group()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"name\"], valueColumn: \"_value\")",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Where is the traffic? \u2014 busiest link over time (drag the slider above to a peak)",
+      "description": "Shares the dashboard time range with the weathermap above, so peaks here line up with time-slider positions. At idle the counter is a step function, so the weathermap reads 0 between steps \u2014 use this strip to find the bursts.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 2,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 1,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "gradientMode": "none",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb"
+          },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"network_interface\")\n  |> filter(fn: (r) => r._field == \"statistics_out-octets\" or r._field == \"statistics_out-octets_mean\")\n  |> group(columns: [\"hostname\", \"interface_name\"])\n  |> aggregateWindow(every: 10s, fn: last, createEmpty: false)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({r with _value: r._value * 8.0}))\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> rename(columns: {_value: \"busiest link\"})",
           "refId": "A"
         }
       ]

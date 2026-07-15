@@ -404,169 +404,28 @@ The receiver line reports loss %, revealing the link's clean ceiling. This same
 
 ## Grafana
 
-The InfluxDB data source and the dashboards are **provisioned automatically** at
-startup — no manual UI clicking. `docker/docker-compose.yml` mounts
-`grafana/provisioning/` into the container and passes the InfluxDB
-org/token/bucket from `docker/.env`:
+Open <http://localhost:3000>, log in with `admin` / `admin`. The InfluxDB data
+source and both dashboards are **provisioned automatically** at startup — no
+manual UI clicking, nothing to import.
 
-- `grafana/provisioning/datasources/influxdb.yml` — InfluxDB data source
-  (Flux, `uid: influxdb`, url `http://influxdb:8086`).
-- `grafana/provisioning/dashboards/dashboards.yml` — file-based dashboard
-  provider.
-- `grafana/provisioning/dashboards/traffic.json` — dashboard **DigSiViz
-  Traffic**: live + time-machine time series.
-- `grafana/provisioning/dashboards/topology.json` — dashboard **DigSiViz
-  Topology**: the flow-panel weathermap (see below). **Generated** — do not
-  hand-edit.
+- **DigSiViz Traffic** — live per-second rates (top row, last 15m) plus the
+  time machine over the 12 downsample tiers (bottom row, `Tier` dropdown).
+- **DigSiViz Topology** — the topology weathermap: links coloured and labelled
+  by bit rate, with a time slider to scrub through history and a
+  `Granularity tier` dropdown to switch resolution.
 
-Two pieces of Grafana config make the historical buckets viewable, and both are
-in the compose file rather than the UI:
+> If a panel looks empty, check the time range **matches the tier** you selected
+> — `traffic-52w` holds points a year apart, so `now-60d` shows nothing. And at
+> genuine idle the weathermap correctly reads `0 b/s` between counter steps; use
+> the **"Where is the traffic?"** strip under it to find the bursts.
 
-- **`GF_PLUGINS_PREINSTALL_SYNC=andrewbmchugh-flow-panel`** — installs the flow
-  panel at boot. `SYNC` matters: the plugin must exist *before* dashboards
-  provision, or `topology.json` references a panel type Grafana does not have
-  yet. (`GF_INSTALL_PLUGINS` is the deprecated spelling, removed guidance as of
-  Grafana 11.)
-- **`INFLUX_TOKEN` / `INFLUX_ORG` / `INFLUX_BUCKET`** — passed from `docker/.env`
-  and interpolated into the datasource YAML, so no credentials are committed.
-
-> **Grafana version policy.** Pinned to an exact tag (`grafana/grafana:13.0.3`),
-> never `latest` — but pinned to the *newest that works*, not frozen. Because the
-> datasource and dashboards are provisioned from files, the `grafana-storage`
-> volume is disposable, which makes a version bump cheap to test and cheap to
-> undo. Verified on 13.0.3: DB migration, Flux queries, provisioning, plugin
-> install. (Flux is **not** deprecated in Grafana — InfluxData deprecated Flux in
-> InfluxDB 3.x, which does not affect Grafana against InfluxDB 2.x.)
-
-Open http://localhost:3000, log in with `admin` / `admin`, and open the
-**DigSiViz Traffic** dashboard. It has **two rows, because live and historical
-data come from different sources**:
-
-- **Live (top row)** — reads the raw `infldb` bucket, pinned to the last 15m
-  (panel `timeFrom`), regardless of the dashboard time range. This is the
-  current per-second traffic; spikes during an `iperf3` run.
-- **Time machine (bottom row)** — reads the 12 downsample tier buckets over the
-  dashboard time range (defaults to `now-5y`), drawn as **bars** (each bar = the
-  downsampled average for that window — more honest than a line between points
-  years apart). The **Tier** dropdown at the top of the dashboard filters to a
-  single bucket (e.g. `12w` for the 3-month tier) or `all`.
-
-Each series is labelled by its `hostname`/`interface_name` (and `tier` on the
-time-machine panels).
-
-### The panel queries (reference)
-
-**Live panels** read one bucket and derive a rate:
-
-```flux
-from(bucket: "infldb")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "network_interface")
-  |> filter(fn: (r) => r._field == "statistics_out-octets")
-  |> group(columns: ["hostname", "interface_name"])
-  |> derivative(unit: 1s, nonNegative: true)
-  |> map(fn: (r) => ({r with _value: r._value * 8.0}))
-```
-
-**Time-machine panels** union all 12 tier buckets (not the raw bucket), tagging
-each with a `tier` so `derivative` never spans two buckets (their counters have
-independent baselines):
-
-```flux
-union(tables: [
-  from(bucket: "traffic-1m") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "network_interface") |> filter(fn: (r) => r._field == "statistics_out-octets") |> set(key: "tier", value: "1m"),
-  // ... one row per tier: 5m, 1h, 8h, 1d, 1w, 4w, 12w, 24w, 52w, 260w, 520w
-])
-  |> group(columns: ["hostname", "interface_name", "tier"])
-  |> sort(columns: ["_time"])
-  |> derivative(unit: 1s, nonNegative: true)
-  |> map(fn: (r) => ({r with _value: r._value * 8.0}))
-```
-
-Common lines: `filter` keeps interface data and the cumulative "bytes sent"
-counter; `derivative(unit: 1s, nonNegative: true)` turns it into bytes/s,
-ignoring resets; `map(... * 8.0)` converts to bits/s. Outbound uses
-`statistics_out-octets`, inbound `statistics_in-octets`.
-
-> Both panel queries are generated, not hand-typed — see
-> `grafana/provisioning/dashboards/traffic.json`.
+**For how any of this works** — what is plugged into Grafana, the flow-panel
+weathermap, the Flux naming contract, the srl-telemetry-lab provenance, the
+version policy, and how to regenerate the topology — see
+**[`grafana/README.md`](grafana/README.md)**.
 
 [↑ Back to top](#top)
 
-## Topology weathermap + time slider (flow panel)
-
-The **DigSiViz Topology** dashboard renders the clab topology as a weathermap:
-each link is coloured and labelled by the outbound bit rate of its router-side
-interface, and a built-in **time slider** scrubs the whole topology through the
-dashboard's time range. Combined with the **Granularity tier** dropdown, this is
-the DigSiViz time machine — and, pointed at a coarse tier bucket, a time machine
-over years.
-
-The approach is modelled on Nokia's reference telemetry lab,
-[`srl-labs/srl-telemetry-lab`](https://github.com/srl-labs/srl-telemetry-lab),
-which drives the same
-[`andrewbmchugh-flow-panel`](https://grafana.com/grafana/plugins/andrewbmchugh-flow-panel/)
-plugin from SRLinux telemetry. Two differences worth knowing:
-
-- Nokia feeds the panel from **Prometheus** (via gnmic); this repo feeds it from
-  **InfluxDB/Flux**. The plugin is datasource-agnostic — see the naming note
-  below. No Prometheus is required.
-- Nokia queries `interface_traffic_rate_out_bps`, a **device-computed rate**
-  exposed by SRLinux over gNMI. This repo polls `statistics_out-octets`, a
-  **cumulative counter**, and derives the rate. The two are *not* equivalent
-  under downsampling (mean-of-rates ≠ derivative-of-mean-of-counters).
-
-### How the data reaches the drawing
-
-The panel binds a query series to an SVG element by **name**: each cell in the
-panelConfig declares a `dataRef`, which must equal the series name Grafana hands
-the plugin.
-
-Grafana presents Flux results as an *unnamed* frame whose `_value` field carries
-the tags as **labels** — so the plugin would see `_value {hostname="r1", …}`,
-which is useless as a `dataRef`. The fix is Flux-side, no panel override needed:
-`pivot()` turns each series into its own **named column**, and Grafana names
-fields after columns.
-
-```flux
-  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0,
-                      name: r.hostname + ":" + r.interface_name + ":out"}))
-  |> group()
-  |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")
-```
-
-This yields fields named exactly `r1:ethernet-1/1:out`, which is what the
-generated panelConfig references.
-
-### Regenerating the weathermap
-
-The SVG, the panelConfig and the dashboard are all **generated from the clab
-topology file**, so the drawing cannot drift from the lab that is actually
-deployed:
-
-```bash
-cd "$(git rev-parse --show-toplevel)/grafana/flow"
-python3 generate_flow.py     # rewrites topology.svg, panelconfig.yml,
-                             # and ../provisioning/dashboards/topology.json
-docker compose -f ../../docker/docker-compose.yml restart grafana
-```
-
-- Node positions live in the `POS` table in `generate_flow.py`; everything else
-  (nodes, links, interface names) is read from `backend/ma-fp-stumpf.clab.yml`.
-- Each physical link is drawn as **two half-lines**, one per direction, each
-  bound to that endpoint's `:out` rate — link utilisation is directional.
-- Only SRLinux routers stream gNMI, so **host-side half-links are drawn but not
-  data-bound** (they render in a dimmer grey). 9 cells are driven: 3 router↔router
-  links × 2 directions, plus 3 router→host links.
-- The SVG and panelConfig are **inlined** into `topology.json` (the panel accepts
-  content or a URL), so the dashboard renders with no network access. Nokia's lab
-  fetches them from raw.githubusercontent instead.
-- A label only works if a `<text>` element **already exists** in the cell — the
-  label drive rewrites existing text, it never creates it.
-- Traffic colour thresholds (`THRESHOLDS` in the generator) are calibrated for
-  this lab and should be revisited once the steady-load rate is settled.
-
-[↑ Back to top](#top)
 
 ## Historical backfill (time-machine test)
 
@@ -606,19 +465,17 @@ coarse tiers — the granularity design made visible.
 
 ### How the buckets get emptied (and how to refill them)
 
-There are two independent ways to lose the contents of the tier buckets. Both are
-easy to trigger by accident, and the fix for both is to re-run `backfill.py`.
+InfluxDB data lives in the named volumes `influxdb-data` / `influxdb-config`, so
+`docker compose down` / `up` is **safe**. Two things still clear the tiers:
 
-1. **`influx apply` recreating a bucket clears it.** Re-running the manifest
-   *unchanged* is safe — `influx-setup` runs on every `docker compose up` and
-   does nothing when nothing changed. But any manifest edit that touches a bucket
-   spec recreates that bucket and drops its data. Re-run `backfill.py` after
-   re-provisioning.
-2. **The `influxdb` service has no named volume.** Only `grafana-storage` is
-   declared, so *all* InfluxDB data lives in the container's writable layer. This
-   means a plain `docker compose down` — **no `-v` required** — destroys every
-   bucket. `docker compose restart` and `stop`/`start` are safe; anything that
-   *removes* the container is not.
+1. **`docker compose down -v`** — removes the volumes, and with them every
+   bucket. This is also the only way to change
+   `DOCKER_INFLUXDB_INIT_RETENTION` (the raw `infldb` retention), which applies
+   at **init** only.
+2. **`influx apply` recreating a bucket.** Re-applying an *unchanged* manifest is
+   safe — `influx-setup` runs on every `docker compose up` and leaves row counts
+   untouched. But any manifest edit that touches a bucket spec recreates that
+   bucket and drops its data.
 
 ```bash
 # refill after either of the above
@@ -626,9 +483,9 @@ cd "$(git rev-parse --show-toplevel)/influxdb"
 python3 backfill.py
 ```
 
-Note also that `DOCKER_INFLUXDB_INIT_RETENTION` (the raw `infldb` retention) only
-applies at **init**, so changing it needs a volume wipe (`docker compose down -v`)
-rather than a restart — which in turn empties the tiers, per (2).
+> Before named volumes existed, *all* InfluxDB data sat in the container's
+> writable layer, so a plain `docker compose down` — no `-v` — destroyed every
+> bucket. If you are on an older checkout, that is why your data keeps vanishing.
 
 ### Regenerating the downsample manifest
 

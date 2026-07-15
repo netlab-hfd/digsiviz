@@ -41,6 +41,12 @@ services:
       - 8086:8086
     networks:
       - kafka_network
+    # Without these, ALL bucket data lives in the container's writable layer, and
+    # a plain `docker compose down` (no -v needed) destroys it. Named volumes
+    # survive down/up; only `down -v` clears them.
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: ${DOCKER_INFLUXDB_INIT_USERNAME}
@@ -62,13 +68,13 @@ services:
         condition: service_healthy
     volumes:
       - ../influxdb/manifest.yml:/manifest.yml:ro
-    entrypoint: >
-      influx apply
-        --host http://influxdb:8086
-        --org ${DOCKER_INFLUXDB_INIT_ORG}
-        --token ${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
-        --file /manifest.yml
-        --force yes
+      - ../influxdb/apply.sh:/apply.sh:ro
+    # apply.sh pins one named stack. A bare `influx apply` creates a new stack
+    # per run and duplicates every task -- see the comment in apply.sh.
+    entrypoint: ["/bin/sh", "/apply.sh"]
+    environment:
+      DOCKER_INFLUXDB_INIT_ORG: ${DOCKER_INFLUXDB_INIT_ORG}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
     networks:
       - kafka_network
 
@@ -124,3 +130,5 @@ networks:
 
 volumes:
   grafana-storage:
+  influxdb-data:
+  influxdb-config:
