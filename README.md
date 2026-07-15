@@ -379,26 +379,63 @@ Start the iperf3 server on `h2` (runs detached, produces no terminal output):
 sudo docker exec -d clab-ma-fp-stumpf-h2 iperf3 -s
 ```
 
-Run the client on `h1` for 60s:
+Run the client on `h1`. **Always pace with `-b`** (see below):
 
 ```bash
-sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -c 10.0.2.102 -t 60
+sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -c 10.0.2.102 -t 60 -b 40M
 ```
 
-### Steady load with UDP
+### Always pace the load: `-b 40M`
 
-The TCP test above sawtooths (bursts then `0.00 Bytes` intervals) on a lossy
-path: TCP interprets loss as congestion and backs off — by design. For a
-**steady, controllable** offered load where every interval transfers, use UDP
-with a target bitrate (`-u -b`). UDP does not back off, so it holds the rate:
+**An unpaced `iperf3 -c ... -t 60` does not work on this lab.** It either stalls
+completely (transfer in the first interval, then `0.00 bits/sec` forever, receiver
+total 0 bytes) or delivers ~50–65 Mbit/s while bleeding hundreds of retransmits.
+Both are the same cause: all clab containers run on one Docker host and SRLinux
+forwards **in software**, so above a threshold the path drops packets and TCP —
+by design — backs off toward zero.
+
+`-b` rate-limits TCP too (application-level pacing). Staying below the loss
+threshold, TCP never sees loss, so it never backs off, and every interval
+transfers:
+
+```
+30s @ -b 40M  →  40.0 Mbit/s, 1 retransmit, sender = receiver = 143 MB
+```
+
+**Measured capacity of the h1→r1→r2→h2 path** (10s runs):
+
+| Offered | Retransmits | Receiver loss |
+|---|---|---|
+| 5M / 10M / 20M / 40M | 0 | 0.0 % |
+| 45M | 1 | 0.0 % |
+| 50M | 4 | 0.0 % |
+| 55M | 228 | 3.3 % |
+| 80M | 306 | 4.0 % — *and delivers less than 60M did* |
+
+**The knee is ~50–55 Mbit/s; use `-b 40M` as the standard load.** Note this is a
+property of *this host*, not of the topology — re-measure on different hardware.
+
+> MTU is **not** involved. `-M`/`-l` (MSS clamping) makes no difference: clamping
+> without pacing still yields 597 retransmits, while pacing without clamping is
+> perfectly clean. Nokia's reference lab uses `-M 1480 -l 1480`, but only its
+> `-b` matters here.
+
+### UDP, and why replay needs it
+
+For **replay** (Task E), UDP is required rather than merely convenient. Paced TCP
+still owns its own congestion control, so it will not obey a target rate under
+loss; UDP ignores congestion control and emits a fixed offered rate, so a recorded
+curve can be *dictated*:
 
 ```bash
-sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -u -c 10.0.2.102 -b 100M -t 20
+sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -u -c 10.0.2.102 -b 40M -t 20
 ```
 
-The receiver line reports loss %, revealing the link's clean ceiling. This same
-`-b <bitrate>` mechanism is how recorded traffic is **replayed** into the twin
-(read a stored bitrate from InfluxDB, drive `iperf3 -u -b <that rate>`).
+The receiver line reports loss %. This `-b <bitrate>` mechanism is how recorded
+traffic is replayed into the twin (read a stored bitrate from InfluxDB, drive
+`iperf3 -u -b <that rate>`). Keep replayed rates **below the ~50 Mbit/s knee**, or
+the twin's forwarding capacity — not the storage granularity — becomes the thing
+limiting fidelity.
 
 [↑ Back to top](#top)
 
