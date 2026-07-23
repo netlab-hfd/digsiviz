@@ -11,8 +11,8 @@ H2=clab-ma-fp-stumpf-h2
 DST=10.0.2.102
 DUR=60
 TOTAL_MBIT=10
-FLOW_COUNTS=(1 2 5 10 20)
-REPS=3
+FLOW_COUNTS=(${E1_FLOWS:-1 2 5 10 20})   # E1-ext ceiling hunt: E1_FLOWS="50 100 200"
+REPS=${E1_REPS:-3}
 BASE_PORT=5201
 OUTDIR="$(cd "$(dirname "$0")" && pwd)/results/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUTDIR"
@@ -20,7 +20,8 @@ mkdir -p "$OUTDIR"
 echo "E1 run -> $OUTDIR"
 
 # --- Start iperf3 servers on h2, one port per potential flow (idempotent) ---
-MAX_FLOWS=20
+MAX_FLOWS=0
+for n in "${FLOW_COUNTS[@]}"; do [ "$n" -gt "$MAX_FLOWS" ] && MAX_FLOWS=$n; done
 for i in $(seq 0 $((MAX_FLOWS - 1))); do
   port=$((BASE_PORT + i))
   docker exec "$H2" pgrep -f "iperf3 -s -p $port" >/dev/null 2>&1 ||

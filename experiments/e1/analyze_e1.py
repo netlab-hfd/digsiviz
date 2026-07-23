@@ -62,6 +62,9 @@ def main(outdir: Path):
             continue
         total_recv = sum(f[0] for f in ok)
         mean_loss = statistics.mean(f[1] for f in ok)
+        # ceiling signature: worst single flow relative to its per-flow target
+        per_flow_target = TOTAL_OFFERED_MBIT / n
+        worst_flow_pct = 100.0 * min(f[0] for f in ok) / per_flow_target
         host = cpu_series(outdir / f"{tag}_hostcpu.log", 1)
         cont = container_cpu(outdir / f"{tag}_containercpu.log")
         runs[n].append({
@@ -71,6 +74,7 @@ def main(outdir: Path):
             "total_recv_mbps": total_recv,
             "achieved_pct": 100.0 * total_recv / TOTAL_OFFERED_MBIT,
             "mean_loss_pct": mean_loss,
+            "worst_flow_pct": worst_flow_pct,
             "host_cpu_mean": statistics.mean(host) if host else float("nan"),
             "host_cpu_max": max(host) if host else float("nan"),
             "cont_cpu": cont,
@@ -82,7 +86,7 @@ def main(outdir: Path):
         return f"{m:6.2f} ± {s:5.2f}"
 
     print(f"{'n':>3} {'reps':>4} {'achieved Mbit/s':>17} {'achieved %':>12} "
-          f"{'loss %':>12} {'host CPU %':>13} {'r1+r2 CPU %':>12}")
+          f"{'loss %':>12} {'worst flow %':>14} {'host CPU %':>13} {'r1+r2 CPU %':>12}")
     for n in sorted(runs):
         reps = runs[n]
         fwd = []
@@ -92,6 +96,7 @@ def main(outdir: Path):
               f"{ms([r['total_recv_mbps'] for r in reps]):>17} "
               f"{ms([r['achieved_pct'] for r in reps]):>12} "
               f"{ms([r['mean_loss_pct'] for r in reps]):>12} "
+              f"{ms([r['worst_flow_pct'] for r in reps]):>14} "
               f"{ms([r['host_cpu_mean'] for r in reps]):>13} "
               f"{ms(fwd) if fwd else 'n/a':>12}")
         incomplete = [r["tag"] for r in reps if r["flows_ok"] != r["flows_expected"]]
