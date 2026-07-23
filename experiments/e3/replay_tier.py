@@ -34,7 +34,11 @@ HOSTNAME = "r1"                # r1 -> r2 is the observed link (out-octets)
 IFACE = "ethernet-1/1"
 GRID = 2                       # s; honest rate lattice (JOURNAL 14)
 SEG_MIN = 5                    # s; smallest iperf3 segment worth running
-CAPACITY_BPS = 10_000_000
+# Safety clamp only — the twin's ~50 Mbit/s CPU knee (JOURNAL 7), with margin.
+# NOT the 10 Mbit/s modelled capacity: the fluct recipe can legitimately sum
+# past 10M (4M base + 8x1.512M), and clipping replay at modelled capacity
+# would add artificial E_real the original never had.
+SAFETY_BPS = 40_000_000
 
 
 def read_meta(path: Path):
@@ -44,6 +48,40 @@ def read_meta(path: Path):
             k, v = line.split("=", 1)
             kv[k] = v
     return int(kv["start_epoch"]), int(kv["end_epoch"]), kv.get("type", "?")
+
+
+def cache_path(meta: Path) -> Path:
+    return meta.with_suffix(".counter.csv")
+
+
+def save_counter_cache(meta: Path, counter):
+    """Dump the raw counter window next to the meta file.
+
+    infldb retains 1h; a multi-tier replay sequence outlives the original's
+    retention, so ground truth must be captured to disk RIGHT AFTER recording
+    and read from cache thereafter. Replay traces are always fresh (< 1h) and
+    stay queryable."""
+    with cache_path(meta).open("w") as f:
+        for t, v in counter:
+            f.write(f"{t.timestamp()},{v}\n")
+
+
+def load_counter_cache(meta: Path):
+    out = []
+    for line in cache_path(meta).read_text().splitlines():
+        ts, v = line.split(",")
+        out.append((datetime.fromtimestamp(float(ts), tz=timezone.utc), float(v)))
+    return out
+
+
+def get_counter(meta: Path, start, end):
+    """Cache-first: fetch from InfluxDB only if no cache exists yet, and write
+    the cache on first fetch."""
+    if cache_path(meta).exists():
+        return load_counter_cache(meta)
+    counter = fetch_window(start, end)
+    save_counter_cache(meta, counter)
+    return counter
 
 
 def fetch_window(start_epoch, end_epoch):
@@ -81,7 +119,7 @@ def main():
 
     meta = Path(args.meta)
     start, end, etype = read_meta(meta)
-    counter = fetch_window(start, end)
+    counter = get_counter(meta, start, end)
     t0 = counter[0][0]
     rate = to_rate(counter, GRID, t0)
     if not rate:
@@ -101,7 +139,7 @@ def main():
             time.sleep(ahead)
         if bps < 1000:            # effectively idle window: send nothing
             continue
-        bps_i = min(int(bps), CAPACITY_BPS)
+        bps_i = min(int(bps), SAFETY_BPS)
         subprocess.run(
             ["docker", "exec", H1, "iperf3", "-u", "-c", DST, "-p", str(PORT),
              "-b", str(bps_i), "-t", str(int(length))],

@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from replay_tier import fetch_window, read_meta  # noqa: E402
+from replay_tier import fetch_window, read_meta, get_counter  # noqa: E402
 sys.path.insert(0, "/home/allan/uni/research_project/projects/digsiviz/influxdb")
 from e_repr import to_rate  # noqa: E402
 
@@ -27,8 +27,10 @@ CAPACITY_MBPS = 10.0
 MAX_LAG_S = 60
 
 
-def series(start, end):
-    counter = fetch_window(start, end)
+def series(start, end, meta=None):
+    """meta given -> cache-first read (original event, may have expired from
+    infldb); meta None -> live fetch (replay trace, always < 1h old)."""
+    counter = get_counter(meta, start, end) if meta else fetch_window(start, end)
     t0 = counter[0][0]
     rate = to_rate(counter, GRID, t0)
     # dense lattice array (fill gaps with 0 = idle)
@@ -63,8 +65,9 @@ def main():
             k, v = line.split("=", 1)
             rmeta[k] = v
 
-    o_start, o_end, etype = read_meta(Path(rmeta["source_meta"]))
-    orig = series(o_start, o_end)
+    src = Path(rmeta["source_meta"])
+    o_start, o_end, etype = read_meta(src)
+    orig = series(o_start, o_end, meta=src)
     repl = series(int(rmeta["replay_start_epoch"]), int(rmeta["replay_end_epoch"]))
 
     lag = xcorr_lag(orig, repl, MAX_LAG_S // GRID)
