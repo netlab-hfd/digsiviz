@@ -18,7 +18,7 @@ H2=clab-ma-fp-stumpf-h2
 DST=10.0.2.102
 BASE_PORT=5201                     # baseline flow
 DYN_PORT0=5202                     # dynamic flows: 5202..5202+MAX_DYN-1
-MAX_DYN=8                          # cap concurrent dynamic flows; keep <= n_max-1 from E1
+MAX_DYN=${REC_MAX_DYN:-8}          # cap concurrent dynamic flows; keep <= n_max-1 from E1
 BASE_RATE=4000000                  # 4 Mbit/s baseline
 FLOW_RATE=1512000                  # 1.512 Mbit/s per dynamic flow
 MEAN_GAP=15                        # fluct: mean seconds between arrivals
