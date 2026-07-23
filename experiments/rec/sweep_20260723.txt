@@ -1,0 +1,76 @@
+=== sweep MAX_DYN=2 ===
+REC fluct for 300s -> /home/allan/uni/research_project/experiments/rec/events/fluct_20260723-161649.meta
+arrival slot=0 len=29s t=+8s
+arrival slot=1 len=20s t=+28s
+arrival slot=0 len=33s t=+55s
+arrival slot=1 len=42s t=+72s
+arrival slot=0 len=34s t=+128s
+arrival slot=1 len=15s t=+135s
+arrival slot=1 len=33s t=+154s
+arrival slot=0 len=36s t=+192s
+arrival slot=1 len=14s t=+206s
+arrival slot=1 len=39s t=+228s
+arrival slot=0 len=44s t=+232s
+arrival slot=0 len=14s t=+286s
+arrival slot=1 len=7s t=+293s
+REC done -> /home/allan/uni/research_project/experiments/rec/events/fluct_20260723-161649.meta
+cached 599 samples -> events/fluct_20260723-161649.meta
+fluct_20260723-161649.meta: 13 dynamic flows, 149 pts @2s, lag +2s
+  intended mean  5.81 | recorded mean  5.98 Mbit/s (delivery 103.01 %)
+  corr 0.9393 | NRMSE  4.00 % cap | MAE  2.73 % cap
+=== sweep MAX_DYN=4 ===
+REC fluct for 300s -> /home/allan/uni/research_project/experiments/rec/events/fluct_20260723-162151.meta
+arrival slot=0 len=16s t=+6s
+arrival slot=1 len=29s t=+21s
+arrival slot=0 len=14s t=+39s
+arrival slot=2 len=41s t=+42s
+arrival slot=0 len=19s t=+57s
+arrival slot=1 len=11s t=+63s
+arrival slot=3 len=42s t=+64s
+arrival slot=0 len=20s t=+81s
+arrival slot=1 len=11s t=+93s
+arrival slot=2 len=37s t=+94s
+arrival slot=0 len=19s t=+107s
+arrival slot=1 len=43s t=+121s
+arrival slot=0 len=16s t=+162s
+arrival slot=2 len=19s t=+163s
+arrival slot=1 len=25s t=+168s
+arrival slot=0 len=43s t=+212s
+arrival slot=1 len=14s t=+218s
+arrival slot=2 len=19s t=+220s
+arrival slot=3 len=41s t=+229s
+arrival slot=1 len=31s t=+236s
+arrival slot=2 len=10s t=+241s
+arrival slot=0 len=13s t=+259s
+arrival slot=1 len=16s t=+272s
+arrival slot=0 len=7s t=+293s
+REC done -> /home/allan/uni/research_project/experiments/rec/events/fluct_20260723-162151.meta
+cached 593 samples -> events/fluct_20260723-162151.meta
+fluct_20260723-162151.meta: 24 dynamic flows, 148 pts @2s, lag +2s
+  intended mean  6.80 | recorded mean  7.03 Mbit/s (delivery 103.36 %)
+  corr 0.9538 | NRMSE  5.97 % cap | MAE  4.10 % cap
+=== sweep MAX_DYN=16 ===
+REC fluct for 300s -> /home/allan/uni/research_project/experiments/rec/events/fluct_20260723-162654.meta
+arrival slot=0 len=12s t=+26s
+arrival slot=1 len=45s t=+27s
+arrival slot=0 len=20s t=+41s
+arrival slot=0 len=43s t=+70s
+arrival slot=1 len=44s t=+99s
+arrival slot=2 len=22s t=+110s
+arrival slot=0 len=24s t=+124s
+arrival slot=0 len=15s t=+168s
+arrival slot=1 len=35s t=+175s
+arrival slot=0 len=14s t=+204s
+arrival slot=1 len=20s t=+211s
+arrival slot=2 len=16s t=+218s
+arrival slot=0 len=20s t=+229s
+arrival slot=0 len=43s t=+250s
+arrival slot=1 len=24s t=+251s
+arrival slot=2 len=28s t=+272s
+arrival slot=1 len=10s t=+290s
+REC done -> /home/allan/uni/research_project/experiments/rec/events/fluct_20260723-162654.meta
+cached 587 samples -> events/fluct_20260723-162654.meta
+fluct_20260723-162654.meta: 17 dynamic flows, 146 pts @2s, lag -2s
+  intended mean  6.20 | recorded mean  6.32 Mbit/s (delivery 102.05 %)
+  corr 0.8211 | NRMSE  8.01 % cap | MAE  5.13 % cap
+SWEEP complete
