@@ -73,16 +73,26 @@ CANVAS = (800, 600)
 RATE_WINDOW = "10s"
 
 # Traffic thresholds in bits/s, driving link stroke colour.
-# NOTE: calibrated for this lab (iperf3 saturation reaches ~70 Mbit/s over veth).
-# Nokia's reference lab uses 200k/500k/1M/5M because it paces traffic to
-# 1.6 Mbit/s total; these are scaled up accordingly and should be revisited once
-# the P1 steady-load rate is settled.
+# Calibrated to the 10 Mbit/s scale-model cap (meeting 2026-07-17: treat the
+# link as a gigabit divided by 100). Levels are fractions of that capacity:
+# 1% / 25% / 50% / 80% — red means "saturated relative to the modelled link".
 THRESHOLDS = [
     ("#bec8d2", 0),  # grey   - idle
-    ("#4BDD33", 100_000),  # green  - light
-    ("#FFFF00", 1_000_000),  # yellow - moderate
-    ("#FF8000", 10_000_000),  # orange - heavy
-    ("#FF3154", 50_000_000),  # red    - saturated
+    ("#4BDD33", 100_000),  # green  - light      (>1%)
+    ("#FFFF00", 2_500_000),  # yellow - moderate  (>25%)
+    ("#FF8000", 5_000_000),  # orange - heavy     (>50%)
+    ("#FF3154", 8_000_000),  # red    - saturated (>80%)
+]
+
+# Node-fill thresholds: same levels, darker tints so the white node label stays
+# readable. Drives "highlight the node where the traffic is" (meeting
+# 2026-07-17, directive 1): a node lights up when its busiest interface does.
+NODE_THRESHOLDS = [
+    ("#2b3a4a", 0),  # idle    - the normal router fill
+    ("#1e4d2b", 100_000),  # green tint
+    ("#5c5416", 2_500_000),  # yellow tint
+    ("#66391a", 5_000_000),  # orange tint
+    ("#7a1f2e", 8_000_000),  # red tint - this node is where the traffic is
 ]
 
 
@@ -175,6 +185,11 @@ def build(kinds, links):
                 )
 
     # ---- nodes -----------------------------------------------------------
+    # Router nodes are data-driven: fill colour follows the node's busiest
+    # interface (`<node>:hot` series from node_query()), so the topology
+    # answers "where is the traffic" at a glance. Host nodes stay static —
+    # they stream no gNMI.
+    node_cells = []
     for node, (cx, cy) in POS.items():
         is_router = kinds.get(node) == "nokia_srlinux"
         fill = "#2b3a4a" if is_router else "#3a3040"
@@ -187,12 +202,17 @@ def build(kinds, links):
         )
         svg.append(f'<text class="nlabel" x="{cx:.1f}" y="{cy:.1f}">{node}</text>')
         svg.append('</g>')
+        if is_router:
+            node_cells.append(node)
 
     svg.append('</svg>')
 
     # ---- panelConfig -----------------------------------------------------
     thresholds = "\n".join(
         f'      - color: "{c}"\n        level: {lvl}' for c, lvl in THRESHOLDS
+    )
+    node_thresholds = "\n".join(
+        f'      - color: "{c}"\n        level: {lvl}' for c, lvl in NODE_THRESHOLDS
     )
     lines = [
         "---",
@@ -204,6 +224,8 @@ def build(kinds, links):
         "anchors:",
         "  thresholds-traffic: &thresholds-traffic",
         thresholds,
+        "  thresholds-node: &thresholds-node",
+        node_thresholds,
         "  label-config: &label-config",
         "    separator: replace",
         "    units: bps",
@@ -219,6 +241,13 @@ def build(kinds, links):
         lines.append("    label: *label-config")
         lines.append("    strokeColor:")
         lines.append("      thresholds: *thresholds-traffic")
+    # Router node fills follow their `<node>:hot` series (busiest interface).
+    # No label config: the label drive would overwrite the node-name <text>.
+    for node in node_cells:
+        lines.append(f"  {node}:")
+        lines.append(f'    dataRef: "{node}:hot"')
+        lines.append("    fillColor:")
+        lines.append("      thresholds: *thresholds-node")
     lines.append("")
 
     return "\n".join(svg), "\n".join(lines)
@@ -268,16 +297,16 @@ def flux_query():
     )
 
 
-def activity_query():
-    """Busiest interface at each instant -- a 'where is the traffic' strip.
+def node_query():
+    """Per-node hot series: `<host>:hot` = the node's busiest interface rate.
 
-    The flow panel renders one instant (the time-slider position), so finding a
-    burst by dragging blind is painful. This companion panel shares the dashboard
-    time range, so peaks here line up horizontally with slider positions above:
-    look for a bar, drag the slider to it.
+    Drives router node fill colour ("highlight the node where the traffic is",
+    meeting 2026-07-17 directive 1). max() across the node's interfaces rather
+    than sum(): a node with one saturated link should light fully, not be
+    diluted by its idle links — same reasoning as activity_query().
 
-    max() across interfaces rather than sum(), so a single busy link still shows
-    at full height instead of being diluted by idle ones.
+    Same rate pipeline as flux_query() (aggregateWindow last -> derivative),
+    then collapsed per (hostname, _time) and pivoted to `<host>:hot` columns.
     """
     return (
         'from(bucket: "${bucket}")\n'
@@ -288,13 +317,44 @@ def activity_query():
         '  |> group(columns: ["hostname", "interface_name"])\n'
         f"  |> aggregateWindow(every: {RATE_WINDOW}, fn: last, createEmpty: false)\n"
         "  |> derivative(unit: 1s, nonNegative: true)\n"
-        "  |> map(fn: (r) => ({r with _value: r._value * 8.0}))\n"
-        '  |> group(columns: ["_time"])\n'
-        '  |> max()\n'
+        '  |> group(columns: ["hostname", "_time"])\n'
+        "  |> max()\n"
+        "  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0,\n"
+        '                      name: r.hostname + ":hot"}))\n'
         "  |> group()\n"
-        '  |> sort(columns: ["_time"])\n'
-        '  |> keep(columns: ["_time", "_value"])\n'
-        '  |> rename(columns: {_value: "busiest link"})'
+        '  |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")'
+    )
+
+
+def activity_query():
+    """Per-NODE busiest-interface rate over time -- the 'where is the traffic'
+    strip (meeting 2026-07-17, directive 1).
+
+    One series per router, so a spike carries its location: the bar's colour /
+    tooltip / legend name the node. Workflow: spot a spike, read (or
+    legend-click to isolate) which node, drag the flow panel's time slider to
+    that instant -- the same node lights up on the topology via its `<host>:hot`
+    fill. This is the closest Grafana-native equivalent of "click the spike and
+    highlight the node": the strip identifies, the slider position highlights.
+
+    max() across each node's interfaces rather than sum(), so a single busy
+    link still shows at full height instead of being diluted by idle ones --
+    same reasoning as node_query().
+    """
+    return (
+        'from(bucket: "${bucket}")\n'
+        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+        '  |> filter(fn: (r) => r._measurement == "network_interface")\n'
+        '  |> filter(fn: (r) => r._field == "statistics_out-octets" or '
+        'r._field == "statistics_out-octets_mean")\n'
+        '  |> group(columns: ["hostname", "interface_name"])\n'
+        f"  |> aggregateWindow(every: {RATE_WINDOW}, fn: last, createEmpty: false)\n"
+        "  |> derivative(unit: 1s, nonNegative: true)\n"
+        '  |> group(columns: ["hostname", "_time"])\n'
+        "  |> max()\n"
+        "  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0, name: r.hostname}))\n"
+        "  |> group()\n"
+        '  |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")'
     )
 
 
@@ -340,23 +400,29 @@ def build_dashboard(svg, cfg):
                         "timingsCtr": 0,
                     },
                 },
-                "targets": [{"datasource": ds, "query": flux_query(), "refId": "A"}],
+                "targets": [
+                    {"datasource": ds, "query": flux_query(), "refId": "A"},
+                    # B feeds the router node fills (`<host>:hot`); the flow
+                    # panel matches dataRefs across all frames of all queries.
+                    {"datasource": ds, "query": node_query(), "refId": "B"},
+                ],
             },
             {
                 "type": "timeseries",
-                "title": "Where is the traffic? — busiest link over time (drag the slider above to a peak)",
+                "title": "Where is the traffic? — per-node load (spot a spike → its colour names the node → drag the slider there, the node lights up)",
                 "description": (
-                    "Shares the dashboard time range with the weathermap above, so "
-                    "peaks here line up with time-slider positions. At idle the "
-                    "counter is a step function, so the weathermap reads 0 between "
-                    "steps — use this strip to find the bursts."
+                    "One series per router: a spike's colour/tooltip identifies "
+                    "WHICH node carried the traffic. Legend-click isolates one "
+                    "node. Drag the weathermap's time slider to the spike and the "
+                    "same node's box lights up on the topology. Shares the "
+                    "dashboard time range, so peaks line up with slider positions."
                 ),
                 "datasource": ds,
                 "gridPos": {"h": 6, "w": 24, "x": 0, "y": 18},
                 "id": 2,
                 "fieldConfig": {
                     "defaults": {
-                        "color": {"mode": "fixed", "fixedColor": "orange"},
+                        "color": {"mode": "palette-classic"},
                         "custom": {
                             "drawStyle": "bars",
                             "fillOpacity": 70,

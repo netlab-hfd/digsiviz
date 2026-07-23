@@ -11,11 +11,22 @@ anchors:
       - color: "#4BDD33"
         level: 100000
       - color: "#FFFF00"
-        level: 1000000
+        level: 2500000
       - color: "#FF8000"
-        level: 10000000
+        level: 5000000
       - color: "#FF3154"
-        level: 50000000
+        level: 8000000
+  thresholds-node: &thresholds-node
+      - color: "#2b3a4a"
+        level: 0
+      - color: "#1e4d2b"
+        level: 100000
+      - color: "#5c5416"
+        level: 2500000
+      - color: "#66391a"
+        level: 5000000
+      - color: "#7a1f2e"
+        level: 8000000
   label-config: &label-config
     separator: replace
     units: bps
@@ -69,3 +80,15 @@ cells:
     label: *label-config
     strokeColor:
       thresholds: *thresholds-traffic
+  r1:
+    dataRef: "r1:hot"
+    fillColor:
+      thresholds: *thresholds-node
+  r2:
+    dataRef: "r2:hot"
+    fillColor:
+      thresholds: *thresholds-node
+  r3:
+    dataRef: "r3:hot"
+    fillColor:
+      thresholds: *thresholds-node
