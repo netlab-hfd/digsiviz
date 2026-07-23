@@ -1,0 +1,7 @@
+source_meta=fluct_20260723-140646.meta
+tier=0
+segment=5
+replay_start_epoch=1784810243
+replay_end_epoch=1784811157
+hostname=r1
+interface=ethernet-1/1

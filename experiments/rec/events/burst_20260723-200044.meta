@@ -1,0 +1,7 @@
+type=burst
+start_epoch=1784829647
+duration=900
+base_rate=4000000
+flow_rate=1512000
+burst_start=+300s flows=4 len=60s
+end_epoch=1784830547

@@ -16,9 +16,9 @@ import statistics
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "/home/allan/uni/research_project/experiments/e3")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "e3"))
 from replay_tier import read_meta, load_counter_cache  # noqa: E402
-sys.path.insert(0, "/home/allan/uni/research_project/projects/digsiviz/influxdb")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "influxdb"))
 from e_repr import to_rate  # noqa: E402
 
 GRID = 2

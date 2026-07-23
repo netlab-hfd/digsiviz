@@ -23,7 +23,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, "/home/allan/uni/research_project/projects/digsiviz/influxdb")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "influxdb"))
 from e_repr import flux, dedupe, to_rate, parse_ts, MEASUREMENT, FIELD  # noqa: E402
 
 H1 = "clab-ma-fp-stumpf-h1"
@@ -149,7 +149,7 @@ def main():
 
     out = meta.with_suffix(f".replay_tier{args.tier}")
     out.write_text(
-        f"source_meta={meta}\ntier={args.tier}\nsegment={every}\n"
+        f"source_meta={meta.name}\ntier={args.tier}\nsegment={every}\n"
         f"replay_start_epoch={int(replay_t0)}\nreplay_end_epoch={int(replay_t1)}\n"
         f"hostname={HOSTNAME}\ninterface={IFACE}\n")
     print(f"replay done -> {out}")

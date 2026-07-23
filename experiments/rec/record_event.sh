@@ -23,7 +23,7 @@ BASE_RATE=4000000                  # 4 Mbit/s baseline
 FLOW_RATE=1512000                  # 1.512 Mbit/s per dynamic flow
 MEAN_GAP=15                        # fluct: mean seconds between arrivals
 FLOW_MIN=10; FLOW_MAX=45           # fluct: dynamic flow duration range (s)
-BURST_AT=$((DUR / 3))              # burst: start offset
+BURST_AT=${REC_BURST_AT:-$((DUR / 3))}   # burst: start offset (env-overridable)
 BURST_FLOWS=4                      # 4 x 1.512 + 4 = ~10 Mbit/s total
 BURST_LEN=60
 OUTDIR="$(cd "$(dirname "$0")" && pwd)/events"

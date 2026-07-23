@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from replay_tier import fetch_window, read_meta, get_counter  # noqa: E402
-sys.path.insert(0, "/home/allan/uni/research_project/projects/digsiviz/influxdb")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "influxdb"))
 from e_repr import to_rate  # noqa: E402
 
 GRID = 2
