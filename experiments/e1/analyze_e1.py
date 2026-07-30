@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """E1 analysis: per-config achieved vs offered, loss, CPU. mean +/- std over reps.
 
-Usage: python3 analyze_e1.py results/<timestamp>/
+Usage: python3 analyze_e1.py results/<timestamp>/ [summary.csv]
+
+The raw per-flow iperf3 JSON is gitignored (bulky, regenerable), so the second
+argument writes the derived per-n summary to CSV — that file is what makes the
+E1 numbers checkable from the repo alone.
 """
+import csv
 import json
 import statistics
 import sys
@@ -49,7 +54,7 @@ def container_cpu(path: Path):
     return {name: statistics.mean(v) for name, v in per.items() if v}
 
 
-def main(outdir: Path):
+def main(outdir: Path, csv_out: Path = None):
     # group files: n{n}_rep{r}_flow{i}.json
     runs = defaultdict(list)  # n -> list of per-rep dicts
     tags = sorted({p.name.split("_flow")[0] for p in outdir.glob("n*_rep*_flow*.json")})
@@ -80,11 +85,15 @@ def main(outdir: Path):
             "cont_cpu": cont,
         })
 
+    def mean_std(vals):
+        return (statistics.mean(vals),
+                statistics.stdev(vals) if len(vals) > 1 else 0.0)
+
     def ms(vals):
-        m = statistics.mean(vals)
-        s = statistics.stdev(vals) if len(vals) > 1 else 0.0
+        m, s = mean_std(vals)
         return f"{m:6.2f} ± {s:5.2f}"
 
+    rows = []
     print(f"{'n':>3} {'reps':>4} {'achieved Mbit/s':>17} {'achieved %':>12} "
           f"{'loss %':>12} {'worst flow %':>14} {'host CPU %':>13} {'r1+r2 CPU %':>12}")
     for n in sorted(runs):
@@ -103,6 +112,25 @@ def main(outdir: Path):
         if incomplete:
             print(f"    WARN incomplete flow sets: {incomplete}")
 
+        row = [n, len(reps)]
+        for key in ("total_recv_mbps", "achieved_pct", "mean_loss_pct",
+                    "worst_flow_pct", "host_cpu_mean"):
+            m, s = mean_std([r[key] for r in reps])
+            row += [f"{m:.2f}", f"{s:.2f}"]
+        rows.append(row)
+
+    if csv_out:
+        with csv_out.open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["n_flows", "reps",
+                        "achieved_mbps_mean", "achieved_mbps_std",
+                        "achieved_pct_mean", "achieved_pct_std",
+                        "loss_pct_mean", "loss_pct_std",
+                        "worst_flow_pct_mean", "worst_flow_pct_std",
+                        "host_cpu_pct_mean", "host_cpu_pct_std"])
+            w.writerows(rows)
+        print(f"\ncsv -> {csv_out}")
+
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]))
+    main(Path(sys.argv[1]), Path(sys.argv[2]) if len(sys.argv) > 2 else None)

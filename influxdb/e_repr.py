@@ -52,7 +52,8 @@ import io
 import subprocess
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 ORG = "myorg"
 TOKEN = "mytoken"
@@ -258,6 +259,21 @@ def pct(x):
     return "  n/a " if x != x else f"{x*100:6.1f}%"
 
 
+def load_counter_csv(path):
+    """Read an `epoch,counter` cache written by e3/replay_tier.py.
+
+    Those caches are the recorded window of a REC event, already deduped and
+    saved before infldb's 1h retention expires them. Reading one makes E_repr
+    reproducible offline — same operator, same truth, no live stack — and lets
+    its result be committed alongside the E3 replay numbers for the same event.
+    """
+    out = []
+    for line in open(path):
+        ts, v = line.split(",")
+        out.append((datetime.fromtimestamp(float(ts), tz=timezone.utc), float(v)))
+    return sorted(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=int, default=55)
@@ -267,22 +283,35 @@ def main():
                     help="hostname:interface, e.g. r1:ethernet-1/1")
     ap.add_argument("--truth-grid", type=float, default=2.0,
                     help="seconds; lattice the ground-truth rate is estimated on")
+    ap.add_argument("--counter-csv", default=None,
+                    help="read the counter from a REC .counter.csv cache instead "
+                         "of querying InfluxDB (offline, reproducible)")
+    ap.add_argument("--csv-out", default=None,
+                    help="append the per-tier metric rows to this CSV")
+    ap.add_argument("--label", default="",
+                    help="event label written into --csv-out rows")
     args = ap.parse_args()
     thr = args.threshold_mbits * 1e6
 
-    raw = fetch_raw(args.minutes)
-    if not raw:
-        sys.exit("No raw data. Is the lab deployed and backend/main.py running?")
-
-    # Pick the busiest series by default — E_repr is only interesting where
-    # there is traffic to lose.
-    if args.series:
-        h, i = args.series.split(":", 1)
-        key = (h, i)
+    if args.counter_csv:
+        key = ("cache", Path(args.counter_csv).name)
+        counter = load_counter_csv(args.counter_csv)
+        n_points = len(counter)
     else:
-        key = max(raw, key=lambda k: raw[k][-1][1] - raw[k][0][1])
+        raw = fetch_raw(args.minutes)
+        if not raw:
+            sys.exit("No raw data. Is the lab deployed and backend/main.py running?")
 
-    counter = dedupe(raw[key])
+        # Pick the busiest series by default — E_repr is only interesting where
+        # there is traffic to lose.
+        if args.series:
+            h, i = args.series.split(":", 1)
+            key = (h, i)
+        else:
+            key = max(raw, key=lambda k: raw[k][-1][1] - raw[k][0][1])
+
+        n_points = len(raw[key])
+        counter = dedupe(raw[key])
     t0 = counter[0][0]
     rate = to_rate(counter, args.truth_grid, t0)
     if len(rate) < 10:
@@ -293,7 +322,7 @@ def main():
     span = (times[-1] - times[0]).total_seconds()
     print(f"series      : {key[0]} {key[1]}")
     print(f"raw window  : {span/60:.1f} min, {len(rate)} rate samples on a "
-          f"{args.truth_grid:g}s grid (from {len(raw[key])} points, "
+          f"{args.truth_grid:g}s grid (from {n_points} points, "
           f"{len(counter)} after dedupe)")
     print(f"raw peak    : {max(truth)/1e6:.1f} Mbit/s   "
           f"mean {sum(truth)/len(truth)/1e6:.2f} Mbit/s")
@@ -307,6 +336,7 @@ def main():
            f"{'shape':>7} {'event F1':>9} {'dur err':>8} {'distrib':>8}")
     print(hdr)
     print("-" * len(hdr))
+    csv_rows = []
     for every in TIERS:
         if every > span / 2:
             print(f"{every:>5}s  (window too short to resolve — skipped)")
@@ -319,6 +349,24 @@ def main():
             print(f"{name:>6} {label:>11} {pct(m['volume'])} {pct(m['peak'])} "
                   f"{pct(m['nrmse'])} {m['f1']:>8.2f}  {pct(m['dur_err'])} "
                   f"{pct(m['emd'])}")
+            csv_rows.append([args.label or key[1], every, label,
+                             f"{m['volume']*100:.2f}", f"{m['peak']*100:.2f}",
+                             f"{m['nrmse']*100:.2f}", f"{m['f1']:.2f}",
+                             f"{m['dur_err']*100:.2f}", f"{m['emd']*100:.2f}",
+                             f"{args.threshold_mbits:g}", f"{max(truth)/1e6:.2f}"])
+
+    if args.csv_out:
+        out = Path(args.csv_out)
+        new = not out.exists()
+        with out.open("a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["event", "tier_s", "order", "volume_err_pct",
+                            "peak_err_pct", "nrmse_pct", "event_f1",
+                            "dur_err_pct", "distrib_err_pct",
+                            "threshold_mbits", "raw_peak_mbits"])
+            w.writerows(csv_rows)
+        print(f"\ncsv -> {out}")
     print("\nagg->deriv = what the cascade does today (aggregates the cumulative")
     print("counter). deriv->agg = the 12d fix (rate first, then aggregate).")
     print("Headline metrics are event F1 and peak; volume ~0% is a sanity check.")

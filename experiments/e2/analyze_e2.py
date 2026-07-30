@@ -5,8 +5,13 @@ Per run: sum receiver-side per-interval rates across flows -> aggregate rate
 time series. Drift = linear-regression slope of that series (Mbit/s per hour)
 + first-quarter vs last-quarter mean comparison. CPU trend likewise.
 
-Usage: python3 analyze_e2.py results/<timestamp>/
+Usage: python3 analyze_e2.py results/<timestamp>/ [summary.csv]
+
+The raw per-flow iperf3 JSON is gitignored (bulky, regenerable), so the second
+argument writes the derived per-run summary to CSV — that file is what makes the
+E2 numbers checkable from the repo alone.
 """
+import csv
 import json
 import statistics
 import sys
@@ -48,7 +53,7 @@ def quarter_means(pairs):
     return first, last
 
 
-def main(outdir: Path):
+def main(outdir: Path, csv_out: Path = None):
     tags = sorted({p.name.split("_flow")[0] for p in outdir.glob("d*_rep*_flow*.json")},
                   key=lambda t: (int(t.split("_")[0][1:]), t))
     by_dur = defaultdict(list)
@@ -85,12 +90,27 @@ def main(outdir: Path):
 
     print(f"{'dur s':>6} {'rep':>4} {'mean Mbit/s':>12} {'drift Mb/s/h':>13} "
           f"{'Q1 mean':>9} {'Q4 mean':>9} {'CPU %':>7} {'CPU %/h':>8}")
+    rows = []
     for dur in sorted(by_dur):
         for r in by_dur[dur]:
-            print(f"{dur:>6} {r['tag'].split('rep')[1]:>4} {r['mean_mbps']:>12.2f} "
+            rep = r["tag"].split("rep")[1]
+            print(f"{dur:>6} {rep:>4} {r['mean_mbps']:>12.2f} "
                   f"{r['slope_mbps_per_h']:>13.3f} {r['q1_mbps']:>9.2f} {r['q4_mbps']:>9.2f} "
                   f"{r['cpu_mean']:>7.1f} {r['cpu_slope_per_h']:>8.2f}")
+            rows.append([dur, rep, f"{r['mean_mbps']:.3f}",
+                         f"{r['slope_mbps_per_h']:.4f}", f"{r['q1_mbps']:.3f}",
+                         f"{r['q4_mbps']:.3f}", f"{r['cpu_mean']:.2f}",
+                         f"{r['cpu_slope_per_h']:.2f}"])
+
+    if csv_out:
+        with csv_out.open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["duration_s", "rep", "mean_mbps", "drift_mbps_per_h",
+                        "q1_mean_mbps", "q4_mean_mbps", "host_cpu_pct",
+                        "host_cpu_pct_per_h"])
+            w.writerows(rows)
+        print(f"\ncsv -> {csv_out}")
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]))
+    main(Path(sys.argv[1]), Path(sys.argv[2]) if len(sys.argv) > 2 else None)
