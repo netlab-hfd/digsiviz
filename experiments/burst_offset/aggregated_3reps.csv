@@ -1,0 +1,4 @@
+event,tier,n,lag_s_mean,lag_s_std,nrmse_pct_mean,nrmse_pct_std,mae_pct_mean,mae_pct_std,mean_ratio_mean,mean_ratio_std,max_ratio_mean,max_ratio_std,std_ratio_mean,std_ratio_std
+burst,0,3,4.0000,0.0000,3.0477,0.8316,1.4947,0.1750,1.0268,0.0006,1.0322,0.0000,1.0097,0.0018
+burst,60,3,10.6667,33.4863,11.7790,0.5026,5.6083,0.2402,1.0314,0.0017,0.7295,0.0075,0.7111,0.0105
+burst,300,3,60.0000,0.0000,15.2200,0.1161,8.6087,0.1185,1.0335,0.0007,0.5868,0.0454,0.4046,0.0128

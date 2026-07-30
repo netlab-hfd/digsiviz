@@ -20,7 +20,8 @@ query + counter→rate conversion on a fixed lattice); no venv packages required
 | `rec/` | `meta_check.py <event.meta>` | intended arrival schedule vs recorded trace (heterogeneous-generator validation) | stdout metrics |
 | `rec/` | `run_sweep.sh` | REC concurrency sweep (`MAX_DYN ∈ {2,4,16}`) | `events/` + `sweep.log` |
 | `e3/` | `run_e3.sh <event.meta> ...` | replay each event from tiers {raw, 60 s, 300 s}, analyze each replay vs the cached original | `results_<ts>.csv` |
-| `e3/` | `aggregate_reps.py [csv ...]` | mean ± sample-std per (event, tier) over repetition CSVs | `aggregated_<n>reps.csv` |
+| `e3/` | `aggregate_reps.py [csv ...]` | mean ± sample-std per (event, tier) over repetition CSVs | `aggregated_<n>reps.csv` **beside the inputs** |
+| `e3/` | `capture_replay_trace.py --watch ../rec/events` | dump each replay's recorded trace to disk before retention drops it | `<event>.replay_tier<N>.counter.csv` |
 | `.` | `run_rep.sh` | one full E3 repetition: record fresh fluct+burst, cache, run `run_e3.sh` over both | one `e3/results_<ts>.csv` |
 | `burst_offset/` | `max_blindness.sh` | fire an identical burst at several offsets within separate 1-min windows; show tier `min`/`max` are invariant to placement | `blindness_<ts>.csv` |
 | `burst_offset/` | `run_alignment.sh` | record a burst starting mid-window (`REC_BURST_AT=330`), replay per tier; tests window-alignment sensitivity | `burst_offset/alignment_*_result.csv` |
@@ -65,6 +66,13 @@ A multi-tier replay sequence outlives `infldb`'s 1 h retention, so each recorded
 window's counter is cached to `<event>.counter.csv` immediately after recording.
 Analysis reads originals from that cache; only replay traces (always < 1 h old)
 are read live from InfluxDB.
+
+The replay traces themselves expire the same way. `analyze_e3.py` reads each one
+live and keeps only the metrics, so an hour later the trace behind a number is
+gone — which makes original-vs-replay plots impossible after the fact. Run
+`e3/capture_replay_trace.py --watch ../rec/events` alongside a replay sequence
+to cache each trace as it lands; `analyze_e3.py` then prefers that cache, so a
+run can also be re-analyzed later.
 
 ## What is / isn't tracked
 

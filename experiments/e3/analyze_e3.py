@@ -15,6 +15,7 @@ import argparse
 import math
 import statistics
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -27,10 +28,21 @@ CAPACITY_MBPS = 10.0
 MAX_LAG_S = 60
 
 
-def series(start, end, meta=None):
+def load_counter_cache_file(path):
+    return [(datetime.fromtimestamp(float(ts), tz=timezone.utc), float(v))
+            for ts, v in (l.split(",") for l in path.read_text().splitlines())]
+
+
+def series(start, end, meta=None, cache=None):
     """meta given -> cache-first read (original event, may have expired from
-    infldb); meta None -> live fetch (replay trace, always < 1h old)."""
-    counter = get_counter(meta, start, end) if meta else fetch_window(start, end)
+    infldb); meta None -> replay trace: use a captured cache if one exists
+    (capture_replay_trace.py), else fetch live (always < 1h old)."""
+    if meta:
+        counter = get_counter(meta, start, end)
+    elif cache and cache.exists():
+        counter = load_counter_cache_file(cache)
+    else:
+        counter = fetch_window(start, end)
     t0 = counter[0][0]
     rate = to_rate(counter, GRID, t0)
     # dense lattice array (fill gaps with 0 = idle)
@@ -65,10 +77,16 @@ def main():
             k, v = line.split("=", 1)
             rmeta[k] = v
 
+    # replay_tier.py records source_meta as a bare filename; resolve it next to
+    # the replay meta rather than against the caller's working directory.
+    rpath = Path(args.replay_meta)
     src = Path(rmeta["source_meta"])
+    if not src.exists():
+        src = rpath.parent / src.name
     o_start, o_end, etype = read_meta(src)
     orig = series(o_start, o_end, meta=src)
-    repl = series(int(rmeta["replay_start_epoch"]), int(rmeta["replay_end_epoch"]))
+    repl = series(int(rmeta["replay_start_epoch"]), int(rmeta["replay_end_epoch"]),
+                  cache=rpath.with_suffix(rpath.suffix + ".counter.csv"))
 
     lag = xcorr_lag(orig, repl, MAX_LAG_S // GRID)
     aligned = [(orig[i], repl[i + lag]) for i in range(len(orig))

@@ -1,0 +1,7 @@
+source_meta=burst_20260730-221938.meta
+tier=300
+segment=300
+replay_start_epoch=1785445525
+replay_end_epoch=1785446425
+hostname=r1
+interface=ethernet-1/1

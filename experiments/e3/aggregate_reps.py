@@ -45,7 +45,10 @@ def main():
     if len(reps) > 1:
         print(f"# WARNING: unbalanced cells (reps per cell: {sorted(reps)})")
 
-    out = HERE / f"aggregated_{max(reps)}reps.csv"
+    # Write beside the inputs, not beside this script: aggregating the
+    # alignment variant in ../burst_offset/ must not overwrite the aligned E3
+    # aggregate that lives here.
+    out = files[0].resolve().parent / f"aggregated_{max(reps)}reps.csv"
     header = ["event", "tier", "n"]
     for m in METRICS:
         header += [f"{m}_mean", f"{m}_std"]
