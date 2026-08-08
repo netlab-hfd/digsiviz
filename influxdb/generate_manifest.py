@@ -164,16 +164,36 @@ def tier1_task(name, every):
     # window's later traffic. The stream is trimmed back to the intended window
     # after differentiating, so exactly one output window is written.
     #
-    # The trim's `stop: LATTICE_S s` (i.e. LATTICE_S seconds into the future,
-    # relative to the task's pinned now()) is not an off-by-one -- it is
-    # required. aggregateWindow stamps each cell at its STOP, so the cell
-    # covering [T+58, T+60) of a window [T, T+60) is stamped exactly T+60 and a
-    # plain `range(start: -task.every)`, whose implicit stop is now() == T+60,
-    # excludes it. Measured cost of getting this wrong: with a burst running at
-    # the window's end, the stored mean came out 22 % low (1.26 vs 1.616 Mbit/s)
-    # -- exactly one 2s cell of a 10.3 Mbit/s burst over a 60s window. With the
-    # trim as written, the window receives rates stamped T+2 .. T+60, which
-    # cover precisely [T, T+60).
+    # `timeSrc: "_start"` on the lattice is load-bearing, and it is the ONLY
+    # thing that fixes a one-cell loss at the end of every window.
+    #
+    # By default aggregateWindow stamps each cell at its STOP, and it will not
+    # emit a cell whose stamp falls outside the source range. For a window
+    # [T, T+60) the cell covering [T+58, T+60) would be stamped exactly T+60 ==
+    # the range stop, so it is dropped: the window yields 29 cells covering only
+    # [T, T+58), and the final two seconds never enter the stream.
+    #
+    # Reading two seconds further (`stop: LATTICE_S s`, i.e. into the future
+    # relative to the task's now()) looks like the fix and IS NOT: **InfluxDB
+    # clamps a task query's range to the task's pinned now()**, so the future
+    # stop is silently ignored. Verified the hard way -- the deployed task
+    # carried `stop: 2s` in its Flux and still stored the 29-cell value.
+    #
+    # Stamping cells at their START instead keeps every stamp inside the range:
+    # cells land on T-2 .. T+58, the derivative drops the first, and the window
+    # gets 30 cells covering exactly [T, T+60).
+    #
+    # Measured cost of getting this wrong, both directions verified: for a burst
+    # running at the window's close the stored mean came out ~20 % low (71.6 vs
+    # 89.9 Mbit of volume, exactly one 2s cell of a 10.333 Mbit/s burst); for a
+    # burst safely inside the window it read 3.4 % HIGH, because the mean was
+    # taken over 29 cells while reconstructing volume assumes 30 (30/29 =
+    # 1.034). With timeSrc as written, mean x window == the raw counter delta
+    # EXACTLY: 154.8 == 154.8 Mbit contained, 89.9 == 89.9 Mbit straddling.
+    #
+    # The lookback of one extra cell is still needed, for a different reason:
+    # derivative() consumes the first sample, so without it the window's first
+    # cell would be missing instead of its last.
     lookback = every_seconds(every) + LATTICE_S
     return f"""\
 apiVersion: influxdata.com/v2alpha1
@@ -193,9 +213,9 @@ spec:
       |> range(start: -{lookback}s)
       |> filter(fn: (r) => r._measurement == "{MEASUREMENT}")
       |> filter(fn: (r) => {field_filter(BASE_FIELDS)})
-      |> aggregateWindow(every: {LATTICE_S}s, fn: last, createEmpty: false)
+      |> aggregateWindow(every: {LATTICE_S}s, fn: last, createEmpty: false, timeSrc: "_start")
       |> derivative(unit: 1s, nonNegative: true)
-      |> range(start: -task.every, stop: {LATTICE_S}s)
+      |> range(start: -task.every)
 
 {body}"""
 

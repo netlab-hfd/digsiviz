@@ -45,9 +45,9 @@ spec:
       |> range(start: -62s)
       |> filter(fn: (r) => r._measurement == "network_interface")
       |> filter(fn: (r) => r._field == "statistics_out-octets" or r._field == "statistics_in-octets")
-      |> aggregateWindow(every: 2s, fn: last, createEmpty: false)
+      |> aggregateWindow(every: 2s, fn: last, createEmpty: false, timeSrc: "_start")
       |> derivative(unit: 1s, nonNegative: true)
-      |> range(start: -task.every, stop: 2s)
+      |> range(start: -task.every)
 
     rate
       |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)
