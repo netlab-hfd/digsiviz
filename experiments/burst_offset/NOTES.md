@@ -63,11 +63,21 @@ carry no rate information (`blindness_20260723-215130.csv`); rate-mode shows the
 stored max equals the true peak at every burst placement
 (`blindness_20260808-181549.csv`).
 
-**Only `blindness_20260808-181549.csv` is a valid rate-mode result.** Two earlier
-runs that evening were taken while the tier summarised 29 lattice cells instead
-of 30 (a boundary bug fixed the same session); their `max` columns were correct
-but their `mean` columns were not, and they are not kept. The numbers and the
-diagnosis are in PROJECT_JOURNAL.md §23c/§23e if the sequence matters.
+**Two rate-mode results are kept, and only one has a trustworthy `mean`
+column:**
+
+| file | offsets | `max` column | `mean` column |
+|---|---|---|---|
+| `blindness_20260808-174257.csv` | +50, +40, +3 | valid | **superseded** — 29 lattice cells |
+| `blindness_20260808-181549.csv` | +50, +40 | valid | valid — 30 cells, reconciles to 1.0000 |
+
+The earlier file is kept because it is the only run covering the +3 s placement,
+and the placement-invariance of `max` is its point. A boundary bug fixed the same
+session meant the tier summarised 29 lattice cells instead of 30, which biased
+`mean` (and only `mean`) — a missing cell cannot lower a maximum unless the peak
+was inside it, and it never was. Diagnosis and corrected numbers:
+PROJECT_JOURNAL.md §23c/§23e. A third run from that evening, taken between the
+two fixes, was not kept.
 
 Independent reconciliation, which is what caught that bug: compare the tier's
 `mean × window` against the **raw counter delta** (last sample before the
