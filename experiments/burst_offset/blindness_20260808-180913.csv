@@ -1,3 +1,0 @@
-offset_s,tier_mean_mbps,tier_min_mbps,tier_max_mbps,tier_median_mbps,raw_mean_mbps,raw_peak_mbps,peak_pos_s,max_err_pct,max_over_mean
-50,1.105,0.0,10.333,0.0,1.461,10.333,52.0,0.0,9.35
-40,2.669,0.0,10.333,0.0,2.669,10.333,42.0,0.0,3.87

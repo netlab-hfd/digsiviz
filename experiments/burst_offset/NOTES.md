@@ -46,3 +46,31 @@ duration-matching alone and the alignment caveat can be dropped from §19.
 
 - Any REC or E3 rep in flight (contaminates both directions).
 - Poller down / telegraf down (tier-1m would have no raw to aggregate).
+
+## Rate-first mode (2026-08-08 onwards)
+
+The cascade now stores mean/min/max/median OF THE RATE (octets/s), not of the
+cumulative counter, so the counter-endpoint checks this driver was written for no
+longer apply to it. Run it with `--rate` via:
+
+```bash
+BLIND_RATE=10M BLIND_BURST_LEN=15 BLIND_ANALYZE_FLAGS=--rate ./max_blindness.sh
+```
+
+which compares the stored max against the true peak instead. The two modes are
+the before/after pair: counter-mode shows min/max are the window's endpoints and
+carry no rate information (`blindness_20260723-215130.csv`); rate-mode shows the
+stored max equals the true peak at every burst placement
+(`blindness_20260808-181549.csv`).
+
+**Only `blindness_20260808-181549.csv` is a valid rate-mode result.** Two earlier
+runs that evening were taken while the tier summarised 29 lattice cells instead
+of 30 (a boundary bug fixed the same session); their `max` columns were correct
+but their `mean` columns were not, and they are not kept. The numbers and the
+diagnosis are in PROJECT_JOURNAL.md §23c/§23e if the sequence matters.
+
+Independent reconciliation, which is what caught that bug: compare the tier's
+`mean × window` against the **raw counter delta** (last sample before the
+window's end minus last before its start). That path uses no lattice and no
+derivative, so it cannot share a defect with the pipeline it is checking. Both
+now agree to ratio 1.0000.
