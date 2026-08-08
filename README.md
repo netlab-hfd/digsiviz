@@ -555,14 +555,25 @@ cd "$(git rev-parse --show-toplevel)"
 sudo clab destroy -t backend/ma-fp-stumpf.clab.yml
 ```
 
-3) Stop the services (add `-v` to also remove the Grafana volume):
+3) Stop the services:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)/docker"
 docker compose down
 ```
 
-InfluxDB has no persistent volume, so its stored metrics are discarded whenever
-its container is recreated. Re-running the pipeline repopulates the bucket.
+A plain `docker compose down` is **safe**: InfluxDB and Grafana both use named
+volumes (`influxdb-data`, `influxdb-config`, `grafana-storage`), so buckets,
+downsample tasks, backfilled history and Grafana's own state all survive a
+`down`/`up` cycle.
+
+> **Do not add `-v` unless you mean it.** `docker compose down -v` removes those
+> volumes, and with them **every bucket and all stored metrics** — the raw
+> bucket, all 12 tier buckets, and the multi-year backfill. Recovering means
+> re-running `influxdb/backfill.py` and waiting for the cascade to refill the
+> fine tiers. Grafana itself re-provisions from files (see
+> [Grafana](#grafana)), so nothing there is lost, but
+> the metrics are gone. `-v` is only useful for a genuinely clean start, e.g.
+> clearing stale ZooKeeper/Kafka state.
 
 [↑ Back to top](#top)
