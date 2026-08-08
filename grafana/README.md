@@ -65,16 +65,29 @@ the tiers, so one panel can be re-pointed at any granularity.
 
 **b) `union()` across tiers, tagged by tier** (`traffic.json` time-machine
 panels). Each bucket is tagged with `set(key: "tier", ...)` and grouped by it, so
-`derivative()` **never spans two buckets** — their counters have independent
-baselines, and differentiating across a boundary produces garbage.
+series from different buckets never mix. Historically this also kept
+`derivative()` from spanning two buckets, whose counters have independent
+baselines; since the rate-first migration (2026-08-08) the tiers store **rates**
+and the panels apply no derivative at all.
 
 **c) Bars, not lines,** for downsampled data. Each bar is the aggregate for that
 window. A line between points years apart falsely implies interpolation.
 
 > **Gotcha: the query range must match the tier.** `traffic-52w` over `now-60d`
-> returns *nothing* — its points are ~a year apart, so a 60-day window contains
-> fewer than the 2 points `derivative()` needs. Over `now-20y` it returns fine.
-> This looks like a broken panel and is not.
+> returns *nothing* — its points are ~a year apart, so a 60-day window may contain
+> no points at all. Over `now-20y` it returns fine. This looks like a broken panel
+> and is not. (Before the rate-first migration the same symptom had a second
+> cause: `derivative()` needs two points, so a range holding one showed nothing.)
+
+> **UNITS (changed 2026-08-08).** The `traffic-*` buckets hold **rates in
+> octets/s** under suffixed field names (`statistics_out-octets_{mean,min,max,
+> median}`), *not* cumulative counters. Multiply by 8 for bits/s and **never
+> apply `derivative()`** to a tier bucket. The raw bucket `infldb` is unchanged:
+> cumulative counters under the base field names, so a rate still has to be
+> derived there. Queries that must serve both — the flow panel's, since its
+> `$bucket` dropdown spans raw *and* tiers — build both pipelines and `union()`
+> them; a bucket holds one naming convention or the other, so exactly one branch
+> is non-empty. See `rate_source()` in `flow/generate_flow.py`.
 
 ---
 
@@ -133,7 +146,10 @@ plugin from SRLinux telemetry. Adopted: the plugin itself, the two-cells-per-lin
   by SRLinux over gNMI. We poll `statistics_out-octets`, a **cumulative counter**,
   and derive the rate. These are *not* equivalent under downsampling
   (mean-of-rates ≠ derivative-of-mean-of-counters) — which quantity you store
-  determines what downsampling does to it.
+  determines what downsampling does to it. **As of 2026-08-08 the cascade derives
+  the rate before the first aggregation**, so the stored quantity is now the same
+  *kind* of thing Nokia stores: a rate. The remaining difference is who computes
+  it — their device, our pipeline (on a 2s lattice).
 
 Nokia also paces traffic hard: `iperf3 -P 8 -b 200K -M 1480 -l 1480` ≈ 1.6 Mbit/s
 total. Their thresholds (200k/500k/1M/5M) are scaled to that; ours are scaled up
@@ -167,6 +183,9 @@ This yields fields named exactly `r1:ethernet-1/1:out` — what the generated
 panelConfig references.
 
 ### Why `aggregateWindow` before `derivative` is load-bearing
+
+> Applies to the **raw** bucket only. Tier buckets already store rates.
+
 
 ```flux
   |> aggregateWindow(every: 10s, fn: last, createEmpty: false)

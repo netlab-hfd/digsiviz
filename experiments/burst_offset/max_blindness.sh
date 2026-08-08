@@ -18,9 +18,15 @@ cd "$(dirname "$0")"
 H1=clab-ma-fp-stumpf-h1
 DST=10.0.2.102
 PORT=5201
-OFFSETS=(3 28 50)          # burst start offset (s) within the 1m window
-BURST_LEN=5
-RATE=40M                   # 12d spec; below the ~50M knee, counters only
+read -r -a OFFSETS <<< "${BLIND_OFFSETS:-3 28 50}"   # burst start offsets (s) within the 1m window
+BURST_LEN=${BLIND_BURST_LEN:-5}
+# 40M was the original 12d spec (counter-mode: any rate works, min/max are
+# endpoints regardless). Use 10M to match the paper's modelled link capacity
+# when checking the RATE-FIRST cascade, where the stored max is compared against
+# the true peak and the value therefore matters.
+RATE=${BLIND_RATE:-40M}
+# Pass --rate once the cascade stores rates (2026-08-08 migration).
+ANALYZE_FLAGS=${BLIND_ANALYZE_FLAGS:-}
 OUT="blindness_$(date +%Y%m%d-%H%M%S).csv"
 WINDOWS=()
 
@@ -43,5 +49,5 @@ WAIT_UNTIL=$((LAST_T + 60 + 45))               # window stop + task offset 30s +
 now=$(date +%s)
 [ "$now" -lt "$WAIT_UNTIL" ] && { echo "waiting $((WAIT_UNTIL - now))s for tier-1m task"; sleep $((WAIT_UNTIL - now)); }
 
-python3 analyze_blindness.py "$OUT" "${WINDOWS[@]}"
+python3 analyze_blindness.py $ANALYZE_FLAGS "$OUT" "${WINDOWS[@]}"
 echo "12d figure data -> $OUT"

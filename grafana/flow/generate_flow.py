@@ -253,6 +253,46 @@ def build(kinds, links):
     return "\n".join(svg), "\n".join(lines)
 
 
+def rate_source(base_field):
+    """Flux that yields a RATE stream grouped per (hostname, interface_name),
+    for whichever bucket `${bucket}` happens to be.
+
+    The dropdown spans the raw bucket AND the tier buckets, and since the
+    2026-08-08 rate-first migration those two hold different things:
+      * infldb        -> cumulative COUNTERS under the base field name, so a
+                        rate must be derived here (on a regular grid: see the
+                        step-function and duplicate-point reasons in
+                        flux_query's docstring).
+      * traffic-*     -> RATES already, in octets/s, under `<base>_mean`.
+                        Differentiating these AGAIN would differentiate a rate.
+
+    Rather than branch on the bucket name, both pipelines are built and unioned:
+    a bucket contains one field naming convention or the other, so exactly one
+    branch is non-empty and the union is the correct stream either way. That
+    keeps a single query valid across the whole dropdown, which is what the flow
+    panel needs -- it binds series by NAME, so the shape of the result must not
+    depend on which bucket is selected.
+    """
+    grp = '  |> group(columns: ["hostname", "interface_name"])\n'
+    return (
+        "counters = from(bucket: \"${bucket}\")\n"
+        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+        '  |> filter(fn: (r) => r._measurement == "network_interface")\n'
+        f'  |> filter(fn: (r) => r._field == "{base_field}")\n'
+        + grp +
+        f"  |> aggregateWindow(every: {RATE_WINDOW}, fn: last, createEmpty: false)\n"
+        "  |> derivative(unit: 1s, nonNegative: true)\n"
+        "\n"
+        "rates = from(bucket: \"${bucket}\")\n"
+        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+        '  |> filter(fn: (r) => r._measurement == "network_interface")\n'
+        f'  |> filter(fn: (r) => r._field == "{base_field}_mean")\n'
+        + grp +
+        "\n"
+        "union(tables: [counters, rates])\n"
+    )
+
+
 def flux_query():
     """Series named `<host>:<iface>:out`, which is what panelConfig dataRefs match.
 
@@ -282,14 +322,7 @@ def flux_query():
     apart than the window.
     """
     return (
-        'from(bucket: "${bucket}")\n'
-        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
-        '  |> filter(fn: (r) => r._measurement == "network_interface")\n'
-        '  |> filter(fn: (r) => r._field == "statistics_out-octets" or '
-        'r._field == "statistics_out-octets_mean")\n'
-        '  |> group(columns: ["hostname", "interface_name"])\n'
-        f"  |> aggregateWindow(every: {RATE_WINDOW}, fn: last, createEmpty: false)\n"
-        "  |> derivative(unit: 1s, nonNegative: true)\n"
+        rate_source("statistics_out-octets") +
         "  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0,\n"
         '                      name: r.hostname + ":" + r.interface_name + ":out"}))\n'
         "  |> group()\n"
@@ -309,14 +342,7 @@ def node_query():
     then collapsed per (hostname, _time) and pivoted to `<host>:hot` columns.
     """
     return (
-        'from(bucket: "${bucket}")\n'
-        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
-        '  |> filter(fn: (r) => r._measurement == "network_interface")\n'
-        '  |> filter(fn: (r) => r._field == "statistics_out-octets" or '
-        'r._field == "statistics_out-octets_mean")\n'
-        '  |> group(columns: ["hostname", "interface_name"])\n'
-        f"  |> aggregateWindow(every: {RATE_WINDOW}, fn: last, createEmpty: false)\n"
-        "  |> derivative(unit: 1s, nonNegative: true)\n"
+        rate_source("statistics_out-octets") +
         '  |> group(columns: ["hostname", "_time"])\n'
         "  |> max()\n"
         "  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0,\n"
@@ -342,14 +368,7 @@ def activity_query():
     same reasoning as node_query().
     """
     return (
-        'from(bucket: "${bucket}")\n'
-        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
-        '  |> filter(fn: (r) => r._measurement == "network_interface")\n'
-        '  |> filter(fn: (r) => r._field == "statistics_out-octets" or '
-        'r._field == "statistics_out-octets_mean")\n'
-        '  |> group(columns: ["hostname", "interface_name"])\n'
-        f"  |> aggregateWindow(every: {RATE_WINDOW}, fn: last, createEmpty: false)\n"
-        "  |> derivative(unit: 1s, nonNegative: true)\n"
+        rate_source("statistics_out-octets") +
         '  |> group(columns: ["hostname", "_time"])\n'
         "  |> max()\n"
         "  |> map(fn: (r) => ({_time: r._time, _value: r._value * 8.0, name: r.hostname}))\n"

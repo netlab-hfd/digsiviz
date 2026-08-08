@@ -14,6 +14,15 @@ What it fixes / adds vs the old hand-written manifest:
     suffix (_mean/_min/_max/_median) in the SAME tier bucket, so no point
     collisions. min/max cascade exactly; mean ~exactly; median-of-medians is an
     approximation (acceptable for downsampling — disclose in the paper).
+  * RATE-FIRST ordering. The tiers store aggregates of the RATE (octets/s), not
+    of the cumulative counter: the derivative is taken on a fixed LATTICE_S
+    lattice before the first aggregateWindow. This is what makes min/max carry
+    the burst envelope instead of the window's endpoints, and what makes the
+    mean conserve volume exactly. See LATTICE_S below for the measurements
+    behind both claims.
+    CONSUMERS MUST NOT apply derivative() to a tier bucket, and existing tier
+    data written by the old counter-first cascade is NOT comparable with data
+    written after this change -- wipe the tier buckets when migrating.
 
 Run:  python3 generate_manifest.py   ->  writes manifest.yml
 Then: docker compose up (influx-setup applies it) or `influx apply -f manifest.yml`
@@ -23,6 +32,44 @@ RAW_BUCKET = "infldb"
 MEASUREMENT = "network_interface"
 BASE_FIELDS = ["statistics_out-octets", "statistics_in-octets"]
 AGGS = ["mean", "min", "max", "median"]  # suffix == flux aggregate fn name
+
+# Rate estimation lattice, in seconds, applied before the first aggregation.
+#
+# WHY THIS EXISTS AT ALL (the ordering fix): the tiers used to aggregate the raw
+# CUMULATIVE COUNTER directly. On a monotone series min == the counter at the
+# window's start and max == the counter at its end, always, so min/max recorded
+# where the window boundaries were and carried no information about the traffic
+# inside it -- verified in 36/36 windows, and an identical burst fired at +3s,
+# +28s and +50s inside a window produced identical stored aggregates. Worse,
+# aggregating counters then differentiating loses volume (measured 6 % at the 1m
+# tier, 30 % at 5m) because derivative() and aggregateWindow() do not commute.
+# The rate must therefore be derived BEFORE the first aggregation.
+#
+# WHY A LATTICE AND NOT A PER-SAMPLE DERIVATIVE: a per-sample derivative divides
+# a counter delta by whatever dt the poll jitter produced, so two samples 0.2s
+# apart carrying 0.5s of traffic read ~2.5x the true rate (measured: a
+# 155.8 Mbit/s peak on a 40 Mbit/s offered load, i.e. above the twin's own
+# forwarding knee and therefore impossible). Snapping to a fixed lattice with
+# fn: last makes dt exact.
+#
+# 2s matches --truth-grid in e_repr.py, deliberately: the deployed cascade and
+# the analysis path must apply the SAME operator, or the evaluation measures a
+# different pipeline than the one that is running.
+LATTICE_S = 2
+
+# Fields in the tier buckets are RATES IN OCTETS PER SECOND, not counters.
+# The names are unchanged (statistics_out-octets_mean, ...) because renaming
+# would ripple through every dashboard, backfill.py and the flow generator; the
+# unit is a property of the whole tier family and is recorded in each bucket's
+# description. Consumers multiply by 8 for bits/s and must NOT apply
+# derivative() to a tier bucket.
+
+
+def every_seconds(every):
+    """'1m'/'8h'/'4w' -> seconds. Only used for the tier-1 lookback."""
+    unit = every[-1]
+    n = int(every[:-1])
+    return n * {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[unit]
 
 # Delay each task's execution past the ingestion lag, WITHOUT shifting the
 # window it reads: InfluxDB keeps a task's `now()` pinned to its scheduled time
@@ -81,7 +128,11 @@ metadata:
   name: traffic-{name}
 spec:
   name: traffic-{name}
-  description: Traffic metrics at {name} resolution (mean/min/max/median fields).
+  description: >-
+    Traffic RATES in octets/s at {name} resolution, stored as
+    mean/min/max/median fields. NOT counters: the rate is derived on a
+    {LATTICE_S}s lattice before the first aggregation, so consumers must
+    multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
       everySeconds: {every_ret_secs}   # {comment}
@@ -93,18 +144,37 @@ def field_filter(fields):
 
 
 def tier1_task(name, every):
-    """First tier: read raw base fields, emit 4 suffixed aggregates."""
+    """First tier: raw counters -> rate on a fixed lattice -> 4 suffixed
+    aggregates OF THE RATE (octets/s). See LATTICE_S for why the derivative
+    comes first and why the lattice is needed."""
     writes = []
     for agg in AGGS:
         writes.append(
             f"""\
-    data
+    rate
       |> aggregateWindow(every: {every}, fn: {agg}, createEmpty: false)
       |> map(fn: (r) => ({{r with _field: r._field + "_{agg}"}}))
       |> to(bucket: "traffic-{name}")
 """
         )
     body = "\n".join(writes)
+    # Read one lattice cell further back than the window, because derivative()
+    # consumes the first sample: without this the tier's first cell is missing
+    # and every aggregate is computed over one cell fewer, biased toward the
+    # window's later traffic. The stream is trimmed back to the intended window
+    # after differentiating, so exactly one output window is written.
+    #
+    # The trim's `stop: LATTICE_S s` (i.e. LATTICE_S seconds into the future,
+    # relative to the task's pinned now()) is not an off-by-one -- it is
+    # required. aggregateWindow stamps each cell at its STOP, so the cell
+    # covering [T+58, T+60) of a window [T, T+60) is stamped exactly T+60 and a
+    # plain `range(start: -task.every)`, whose implicit stop is now() == T+60,
+    # excludes it. Measured cost of getting this wrong: with a burst running at
+    # the window's end, the stored mean came out 22 % low (1.26 vs 1.616 Mbit/s)
+    # -- exactly one 2s cell of a 10.3 Mbit/s burst over a 60s window. With the
+    # trim as written, the window receives rates stamped T+2 .. T+60, which
+    # cover precisely [T, T+60).
+    lookback = every_seconds(every) + LATTICE_S
     return f"""\
 apiVersion: influxdata.com/v2alpha1
 kind: Task
@@ -112,15 +182,20 @@ metadata:
   name: downsample-raw-to-{name}
 spec:
   name: downsample-raw-to-{name}
-  description: Downsamples raw {RAW_BUCKET} to {name} mean/min/max/median.
+  description: >-
+    Derives the rate from raw {RAW_BUCKET} counters on a {LATTICE_S}s lattice,
+    then stores {name} mean/min/max/median OF THE RATE (octets/s).
   every: {every}
   offset: {OFFSET}
   query: |
 
-    data = from(bucket: "{RAW_BUCKET}")
-      |> range(start: -task.every)
+    rate = from(bucket: "{RAW_BUCKET}")
+      |> range(start: -{lookback}s)
       |> filter(fn: (r) => r._measurement == "{MEASUREMENT}")
       |> filter(fn: (r) => {field_filter(BASE_FIELDS)})
+      |> aggregateWindow(every: {LATTICE_S}s, fn: last, createEmpty: false)
+      |> derivative(unit: 1s, nonNegative: true)
+      |> range(start: -task.every, stop: {LATTICE_S}s)
 
 {body}"""
 
