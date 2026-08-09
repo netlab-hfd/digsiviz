@@ -12,6 +12,16 @@ InfluxDB drops it as already-expired. So each tier is backfilled across its
 OWN retention span at its OWN resolution. The multi-year scroll comes from the
 coarse buckets (52w/260w/520w), which have multi-year retention.
 
+traffic-520w has NO cascade task at all (generate_manifest.cascade_capable): a
+520-week window cannot fit inside a ten-year retention, so any task would
+summarise the window from a fraction of itself. This script is its ONLY writer.
+
+TIMESTAMPS match the cascade exactly -- same epoch-aligned grid, stamped at each
+window's START (generate_manifest.TIMESRC). Backfilled and cascade-written points
+therefore land on the same boundaries instead of interleaving half a window
+apart. See build_lines() for the span snap that keeps that true where a tier's
+retention is not a whole multiple of its step.
+
 Schema matches what the cascade now writes:
   measurement = network_interface
   fields      = statistics_{out,in}-octets_{mean,min,max,median}
