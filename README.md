@@ -478,16 +478,22 @@ python3 backfill.py
 ```
 
 What it does:
-- Writes synthetic cumulative-counter points **directly into each tier bucket**
+- Writes synthetic **rate** points (octets/s) **directly into each tier bucket**
   (bypassing the cascade), backdated across that tier's own retention window at
   its own resolution. The multi-year span comes from the coarse buckets
   (`traffic-52w`, `-260w`, `-520w`), which have multi-year retention.
 - Each point must fall **inside** the bucket's retention window — a point on the
   exact lower bound is rejected, so the oldest point is placed one step in.
-- Uses the live schema (`network_interface` measurement, `statistics_out-octets`
-  / `statistics_in-octets` base fields) so the Grafana panels render it
-  unchanged. It is a mechanics test of the buckets + time machine, **not** the
-  research pipeline. Re-running overwrites (idempotent).
+- Timestamps sit on the same **epoch-aligned grid** the cascade writes to, and
+  are stamped at the window's **start**, matching `timeSrc: "_start"`. Backfilled
+  and cascade-written points therefore land on the same boundaries instead of
+  interleaving half a window apart.
+- Uses the live schema (`network_interface` measurement, suffixed rate fields
+  `statistics_out-octets_mean` / `_min` / `_max` / `_median`, and the same for
+  `in-octets`) so the Grafana panels render it unchanged. It is a mechanics test
+  of the buckets + time machine, **not** the research pipeline. Re-running
+  overwrites (idempotent).
+- It is also the **only** writer for `traffic-520w`, which has no cascade task.
 
 Verify it worked:
 
@@ -533,13 +539,47 @@ regenerate:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)/influxdb"
-python3 generate_manifest.py       # rewrites manifest.yml
+python3 generate_manifest.py       # rewrites manifest.yml, prints the tier table
 ```
+
+It prints the derived schedule/retention table it just wrote, which is the
+quickest way to see the current ladder without reading 700 lines of YAML.
 
 Each tier stores `mean`, `min`, `max` and `median` as separate field suffixes
 (`statistics_out-octets_mean`, `_min`, `_max`, `_median`). `min`/`max` cascade
 exactly across tiers, `mean` approximately, and `median`-of-medians is an
 approximation.
+
+Three properties of the generated manifest are worth knowing, because they are
+derived rather than written down and none of them are obvious from the YAML:
+
+**Retention is derived from two terms, whichever is larger.** *Pipeline*: two
+windows of the task that reads this tier, so the windows that task rewrites are
+still present. *Coverage*: 24 points at this tier's own resolution, capped at
+the ten-year horizon — the term the granularity argument actually asks for.
+Floored to InfluxDB's 1 h minimum; the terminal `traffic-520w` carries no
+retention rule at all, i.e. infinite.
+
+**A task's schedule is independent of its window.** Each task fires at most a
+day apart and rewrites its last two *closed* windows every run. Rewrites are
+free (`to()` overwrites on identical tags+field+timestamp), so a run missed
+during an outage is repaired by the next one, and a tier whose window is
+measured in years is populated from its first day rather than after a decade of
+uptime. The window the present moment sits inside is never published — an
+aggregate over an unfinished window is exactly the truncated-window defect the
+30 s task offset exists to prevent at tier 1.
+
+**Every aggregate is stamped at its window's START** (`timeSrc: "_start"`),
+uniformly, at every tier. `aggregateWindow` defaults to stamping at the window's
+*stop* and will not emit a window whose stamp falls outside the source range, so
+with the default each cascade stage silently dropped the source point landing on
+its closing boundary. Consumers should read a tier point as "the window
+beginning here". Tier data written before this change is stamped one window
+later and must not be mixed with data written after it.
+
+`traffic-520w` has **no task**: a 520-week window cannot fit inside a ten-year
+retention, so any cascade task would summarise the window from a fraction of
+itself. It is populated by `backfill.py`, and its bucket description says so.
 
 [↑ Back to top](#top)
 

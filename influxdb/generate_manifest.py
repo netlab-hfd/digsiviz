@@ -66,7 +66,7 @@ LATTICE_S = 2
 
 
 def every_seconds(every):
-    """'1m'/'8h'/'4w' -> seconds. Only used for the tier-1 lookback."""
+    """'1m'/'8h'/'4w' -> seconds."""
     unit = every[-1]
     n = int(every[:-1])
     return n * {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[unit]
@@ -88,21 +88,230 @@ def every_seconds(every):
 # 1m `every`.
 OFFSET = "30s"
 
-# (tier_name, every, retention_seconds, retention_comment)
+# The tier ladder. Retention is DERIVED (see retention() below), not written by
+# hand: the previous hand-written table set every retention to 2x the consuming
+# task's interval, which made the SCHEDULER decide how far back each resolution
+# stays queryable. That is backwards — this paper's whole claim is that data AGE
+# decides resolution — and at the coarse end it produced absurdities: traffic-260w
+# retained for 20 years so that a task firing once per decade would always find
+# its window, and the terminal traffic-520w retained for an arbitrary 10 years
+# because no rule applied to it at all.
+#
+# (tier_name, every)
 TIERS = [
-    ("1m",   "1m",   3600,      "floored to InfluxDB 1h minimum (2x rule -> 600s, rejected)"),
-    ("5m",   "5m",   7200,      "2h = 2x the 1h consuming task"),
-    ("1h",   "1h",   57600,     "16h = 2x the 8h consuming task"),
-    ("8h",   "8h",   172800,    "2d = 2x the 1d consuming task"),
-    ("1d",   "1d",   1209600,   "2w = 2x the 1w consuming task"),
-    ("1w",   "1w",   4838400,   "8w = 2x the 4w consuming task"),
-    ("4w",   "4w",   14515200,  "24w = 2x the 12w consuming task"),
-    ("12w",  "12w",  29030400,  "48w = 2x the 24w consuming task"),
-    ("24w",  "24w",  62899200,  "~2y = 2x the 52w consuming task"),
-    ("52w",  "52w",  314496000, "~10y = 2x the 260w consuming task"),
-    ("260w", "260w", 628992000, "~20y = 2x the 520w consuming task"),
-    ("520w", "520w", 314496000, "~10y terminal tier, no downstream task"),
+    ("1m",   "1m"),
+    ("5m",   "5m"),
+    ("1h",   "1h"),
+    ("8h",   "8h"),
+    ("1d",   "1d"),
+    ("1w",   "1w"),
+    ("4w",   "4w"),
+    ("12w",  "12w"),
+    ("24w",  "24w"),
+    ("52w",  "52w"),
+    ("260w", "260w"),
+    ("520w", "520w"),
 ]
+
+# The time-machine depth this work claims. Every tier's coverage is capped here:
+# retaining a resolution for longer than the deepest query the system offers is
+# storage with no reader.
+HORIZON_S = 314496000       # 520w ~ 10 years
+
+# Points a tier must hold for its own trace to be readable rather than merely
+# sufficient to feed the next task. Storage is then CONSTANT per tier
+# (ROWS x |SERIES| x |AGGS| points), which is the property that makes the ladder
+# cheap: a tier's span grows exactly as fast as its resolution coarsens.
+ROWS = 24
+
+INFLUX_MIN_RETENTION_S = 3600   # InfluxDB rejects anything shorter (except 0)
+
+# --- Schedule decoupled from window -----------------------------------------
+#
+# A cascade task used to have ONE knob, `every`, doing two unrelated jobs: how
+# often the task fires, AND how much history it summarises (via
+# `range(start: -task.every)`). Tying them together has two costs:
+#
+#   * COLD START. traffic-520w's task fires once per 520 weeks, so the bucket
+#     stays empty for a decade and the coarse tiers are reachable only by
+#     backfill.py. Nothing about restart recovery fixes this -- the task was
+#     never due, so there are no missed runs to catch up on.
+#   * NO SELF-HEALING. Miss the single fire that covers a window (host down,
+#     Influx restart, task error) and that window is gone permanently, because
+#     the next fire looks at the NEXT window only.
+#
+# Both go away by separating the two: fire on REFRESH, summarise on W.
+#
+#   spec.every = refresh = min(W, REFRESH_CAP)
+#   query range = the last K_WINDOWS *closed* windows of width W
+#
+# Rewriting a window is free: `to()` overwrites on identical
+# (measurement, tags, field, timestamp), so every run simply restates the last
+# K_WINDOWS windows with whatever source data now exists. A run missed during an
+# outage is repaired by the next run, at any tier, with no operator action.
+REFRESH_CAP_S = 86400   # never sleep longer than a day between refreshes
+K_WINDOWS = 2           # closed windows recomputed per run; 1 window of catch-up
+
+# Only CLOSED windows are published. The open one -- the window the present
+# moment sits inside -- is deliberately skipped: publishing it would store an
+# aggregate computed over a window that has not finished, which is precisely the
+# truncated-window defect that OFFSET exists to prevent at tier 1. Costs one
+# window of freshness at each tier, buys that every stored point is complete.
+#
+# Window boundaries are epoch-aligned, matching aggregateWindow's own default
+# gridding, so the range and the windows it produces cannot drift apart.
+
+# Stamp EVERY aggregate at its window's START, uniformly, at every tier.
+#
+# THIS IS A CORRECTNESS FIX, not a cosmetic one. aggregateWindow defaults to
+# stamping a window at its STOP, and it will not emit a window whose stamp falls
+# outside the source range. Tier 1's lattice already had to be switched to
+# `_start` for exactly this reason (its final 2s cell was being dropped, biasing
+# every aggregate). The same defect was still live at every tier >= 2: tier N-1
+# writes a point stamped at its window's stop, tier N reads a W-wide range, and
+# the source point stamped exactly on the closing boundary lands in the NEXT
+# window and is dropped -- so each cascade stage silently summarised one source
+# point fewer than it should.
+#
+# Uniform start-stamping makes every point mean "the window beginning here", so
+# a half-open range [B-W, B) contains exactly the points belonging to it, at
+# every stage. Values are unchanged; only the timestamp label moves, by one
+# window. Mixing tier data written before and after this change is therefore
+# wrong -- wipe the tier buckets when migrating (the same wipe the rate-first
+# migration already requires).
+TIMESRC = "_start"
+
+
+def retention(idx):
+    """Two-term retention for tier `idx`. Returns (seconds, comment);
+    0 seconds == infinite (the bucket then carries no retentionRules).
+
+        pipeline_N  = K_WINDOWS x every_{N+1}
+                                       -- the consuming task recomputes its last
+                                          K_WINDOWS closed windows on every run,
+                                          so this tier must still hold them. This
+                                          is what makes an outage self-repairing:
+                                          the window missed while the host was
+                                          down is rebuilt from source data that
+                                          is still here.
+                      Dropped when every_{N+1} >= HORIZON_S: a task slower than
+                      the horizon never fires inside the system's own lifetime,
+                      so sizing storage for it is fiction.
+        coverage_N  = min(ROWS x every_N, HORIZON_S)   -- the policy term, i.e.
+                      the retention the granularity argument actually asks for.
+
+        retention_N = max(pipeline_N, coverage_N), floored to InfluxDB's minimum.
+
+    max() is load-bearing: the policy term can only ever ADD retention, never
+    undercut what the cascade needs to keep running.
+    """
+    name, every = TIERS[idx]
+    own = every_seconds(every)
+
+    if idx + 1 < len(TIERS):
+        nxt_name, nxt_every = TIERS[idx + 1]
+        nxt = every_seconds(nxt_every)
+        if nxt < HORIZON_S:
+            pipeline, pipe_why = (K_WINDOWS * nxt,
+                                  f"{K_WINDOWS} windows of the {nxt_name} consuming task")
+        else:
+            pipeline, pipe_why = 0, None    # consumer slower than the horizon
+    else:
+        pipeline, pipe_why = 0, None        # terminal tier, no consumer
+        # A terminal tier has no downstream deadline and no coarser tier to fall
+        # back on, so its coverage IS the end of the chain: infinite. One point
+        # per decade per series costs nothing, and expiring it would silently
+        # cap the "10 years into the past" claim.
+        return 0, "infinite: terminal tier, no consumer and no coarser fallback"
+
+    capped = ROWS * own >= HORIZON_S
+    coverage = min(ROWS * own, HORIZON_S)
+    cov_why = ("capped at the 10y horizon" if capped
+               else f"{ROWS} points at {every} resolution")
+
+    if coverage >= pipeline:
+        secs, why = coverage, f"coverage: {cov_why}"
+    else:
+        secs, why = pipeline, f"pipeline: {pipe_why}"
+
+    if secs < INFLUX_MIN_RETENTION_S:
+        return INFLUX_MIN_RETENTION_S, f"floored to InfluxDB 1h minimum ({why} -> {secs}s)"
+    return secs, why
+
+def cascade_capable(idx):
+    """Can tier `idx` be built by the cascade at all, or only by backfill.py?
+
+    Publishing only CLOSED windows means the newest window a task can write is
+    the one that ended most recently -- whose START is between W and 2W old,
+    depending where in the cycle the task fires. The source tier must therefore
+    still hold 2W of history, or the window gets summarised from whatever
+    fraction has not yet expired and a truncated aggregate is written silently.
+
+    That is the same defect OFFSET prevents at tier 1 and that uniform
+    start-stamping prevents between tiers -- so it is not acceptable here
+    either. Where the condition fails, NO task is generated: the bucket exists
+    and is populated by backfill.py, and says so in its description.
+
+    In the current ladder exactly one tier fails: traffic-520w needs 20 years of
+    traffic-260w and the horizon caps retention at 10. A 520w-wide window can
+    never fit inside a 10-year retention, so no scheduling choice fixes it --
+    the terminal tier is structurally beyond the cascade's reach.
+    """
+    if idx == 0:
+        return True
+    w = every_seconds(TIERS[idx][1])
+    src_ret, _ = retention(idx - 1)
+    dst_ret, _ = retention(idx)
+    ok_src = src_ret == 0 or src_ret >= K_WINDOWS * w
+    ok_dst = dst_ret == 0 or dst_ret >= 2 * w
+    return ok_src and ok_dst
+
+
+def schedule(idx):
+    """Refresh cadence and read-back span for tier `idx` (idx >= 1).
+
+    Returns (refresh_seconds, lookback_seconds, note).
+
+    lookback is clamped twice, and both clamps are load-bearing:
+
+      * by the SOURCE tier's retention -- asking for windows that have already
+        expired upstream reads nothing and only makes the query look like it
+        covers more than it does;
+      * by the DESTINATION tier's retention, minus one window. Points are
+        stamped at their window's START, so the oldest point a run writes is
+        already `lookback + (time since the boundary)` old, and that trailing
+        term reaches a full window just before the next boundary. Ignore it and
+        the run does not merely skip that point -- InfluxDB fails the WHOLE run
+        with "dropped N points outside retention policy", so ONE unwritable old
+        window takes the fresh ones down with it. Measured, not predicted:
+        downsample-52w-to-260w failed exactly this way, trying to stamp a window
+        at 2014-11-06 against a 10-year retention.
+
+    The result is floored to one window: a task that cannot even rewrite its own
+    newest closed window has nothing useful to do, and cascade_capable() has
+    already excluded that case.
+    """
+    name, every = TIERS[idx]
+    w = every_seconds(every)
+    refresh = min(w, REFRESH_CAP_S)
+
+    want = K_WINDOWS * w
+    src_ret, _ = retention(idx - 1)
+    dst_ret, _ = retention(idx)
+
+    limits = [want]
+    if src_ret:
+        limits.append(src_ret)
+    if dst_ret:
+        limits.append(dst_ret - w)
+    lookback = max(w, (min(limits) // w) * w)
+
+    windows = lookback // w
+    note = f"{windows} closed window(s) of {every}"
+    if lookback < want:
+        note += ", clamped by retention"
+    return refresh, lookback, note
+
 
 HEADER = """\
 # GENERATED by generate_manifest.py — DO NOT hand-edit. Change the tier table
@@ -113,15 +322,36 @@ HEADER = """\
 # mean/min/max/median over its window, writes suffixed fields (_mean/_min/_max/
 # _median) into its bucket.
 #
-# Retention rule: a tier's retention >= the `every` of the task that reads FROM
-# it, or the source expires before consumption. Each below = 2x that interval
-# (floored to InfluxDB's 3600s minimum). Init bucket "infldb"
+# Each task's SCHEDULE is independent of its WINDOW: it fires at most a day
+# apart and rewrites its last 2 closed windows every run. Rewrites are free
+# (`to()` overwrites on identical tags+field+timestamp), so a run missed during
+# an outage is repaired by the next one, and a tier whose window is measured in
+# years is populated from its first day instead of after a decade of uptime.
+# Only CLOSED windows are published — never the one the present sits inside.
+#
+# All aggregates are stamped at their window's START (timeSrc: "_start"),
+# uniformly, at every tier: with the default stop-stamping each stage silently
+# dropped the source point landing on its closing boundary.
+#
+# Retention is DERIVED, two terms, whichever is larger:
+#   pipeline = 2 windows of the task that READS this tier, so the windows it
+#              rewrites are still here (dropped where that task is slower than
+#              the 10y horizon and so never fires in practice);
+#   coverage = 24 points at this tier's own resolution, capped at the 10y
+#              horizon — the term the granularity argument actually asks for.
+# Floored to InfluxDB's 3600s minimum. The terminal tier carries no
+# retentionRules at all, i.e. infinite. Init bucket "infldb"
 # (DOCKER_INFLUXDB_INIT_BUCKET) is the raw source — not defined here.
 """
 
 
-def bucket_block(name, every_ret_secs, comment):
-    return f"""\
+def bucket_block(name, every_ret_secs, comment, capable=True):
+    source = ("" if capable else
+              " NO cascade task writes this tier: a {n}-wide window cannot fit"
+              " inside the source tier's retention, so it would only ever be"
+              " summarised from a fraction of itself. Populated by"
+              " backfill.py.".format(n=name))
+    head = f"""\
 apiVersion: influxdata.com/v2alpha1
 kind: Bucket
 metadata:
@@ -132,7 +362,13 @@ spec:
     Traffic RATES in octets/s at {name} resolution, stored as
     mean/min/max/median fields. NOT counters: the rate is derived on a
     {LATTICE_S}s lattice before the first aggregation, so consumers must
-    multiply by 8 for bits/s and must NOT apply derivative().
+    multiply by 8 for bits/s and must NOT apply derivative().{source}
+"""
+    if every_ret_secs == 0:
+        # Omitting retentionRules is how the pkger spec expresses infinite
+        # retention; `everySeconds: 0` is accepted too but reads as a mistake.
+        return head + f"  # retention: {comment}\n"
+    return head + f"""\
   retentionRules:
     - type: expire
       everySeconds: {every_ret_secs}   # {comment}
@@ -146,13 +382,23 @@ def field_filter(fields):
 def tier1_task(name, every):
     """First tier: raw counters -> rate on a fixed lattice -> 4 suffixed
     aggregates OF THE RATE (octets/s). See LATTICE_S for why the derivative
-    comes first and why the lattice is needed."""
+    comes first and why the lattice is needed.
+
+    Deliberately NOT converted to the decoupled schedule the cascade tiers use.
+    Its lookback is tuned to one lattice cell past the window because
+    derivative() consumes the first sample, and its correctness (mean x window
+    == the raw counter delta, exactly) was verified against that specific range.
+    It also gains the least: it already fires every 60s, and its source `infldb`
+    retains 1h, so there is barely anything to re-read. The cost is that tier 1
+    alone is not self-healing -- an outage loses raw-resolution points, which are
+    the shortest-lived points in the system anyway.
+    """
     writes = []
     for agg in AGGS:
         writes.append(
             f"""\
     rate
-      |> aggregateWindow(every: {every}, fn: {agg}, createEmpty: false)
+      |> aggregateWindow(every: {every}, fn: {agg}, createEmpty: false, timeSrc: "{TIMESRC}")
       |> map(fn: (r) => ({{r with _field: r._field + "_{agg}"}}))
       |> to(bucket: "traffic-{name}")
 """
@@ -220,8 +466,15 @@ spec:
 {body}"""
 
 
-def tierN_task(name, every, prev):
-    """Later tiers: read prev tier's suffixed fields, aggregate like-with-like."""
+def tierN_task(name, every, prev, refresh_s, lookback_s, note):
+    """Later tiers: read prev tier's suffixed fields, aggregate like-with-like.
+
+    The schedule (`every: refresh`) is independent of the window (`every` in the
+    aggregateWindow calls) -- see REFRESH_CAP_S / K_WINDOWS. The query pins its
+    own range to the last closed window boundary rather than using task.every,
+    so re-running mid-window recomputes the same closed windows and overwrites
+    them, instead of publishing a partial one.
+    """
     writes = []
     for agg in AGGS:
         agg_fields = [f"{f}_{agg}" for f in BASE_FIELDS]
@@ -229,7 +482,7 @@ def tierN_task(name, every, prev):
             f"""\
     src
       |> filter(fn: (r) => {field_filter(agg_fields)})
-      |> aggregateWindow(every: {every}, fn: {agg}, createEmpty: false)
+      |> aggregateWindow(every: {every}, fn: {agg}, createEmpty: false, timeSrc: "{TIMESRC}")
       |> to(bucket: "traffic-{name}")
 """
         )
@@ -241,33 +494,70 @@ metadata:
   name: downsample-{prev}-to-{name}
 spec:
   name: downsample-{prev}-to-{name}
-  description: Downsamples the {prev} tier to {name} (mean/min/max/median cascade).
-  every: {every}
+  description: >-
+    Downsamples the {prev} tier to {name} (mean/min/max/median cascade).
+    Refreshes every {refresh_s}s and rewrites {note}, so a run missed
+    during an outage is repaired by the next one.
+  every: {refresh_s}s
   offset: {OFFSET}
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: {every})
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: {lookback_s}s)
+
     src = from(bucket: "traffic-{prev}")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "{MEASUREMENT}")
 
 {body}"""
 
 
+def human(secs):
+    if secs == 0:
+        return "infinite"
+    for unit, n in (("y", 31449600), ("w", 604800), ("d", 86400), ("h", 3600)):
+        if secs >= n:
+            v = secs / n
+            return f"{v:.0f}{unit}" if abs(v - round(v)) < 0.05 else f"~{v:.1f}{unit}"
+    return f"{secs}s"
+
+
 def main():
     docs = [HEADER]
     prev = None
-    for name, every, ret, comment in TIERS:
-        docs.append(bucket_block(name, ret, comment))
+    table = []
+    for idx, (name, every) in enumerate(TIERS):
+        ret, comment = retention(idx)
+        capable = cascade_capable(idx)
+        docs.append(bucket_block(name, ret, comment, capable))
         if prev is None:
             docs.append(tier1_task(name, every))
+            table.append((name, every, ret, comment, every, "tier 1: not decoupled"))
+        elif capable:
+            refresh_s, lookback_s, note = schedule(idx)
+            docs.append(tierN_task(name, every, prev, refresh_s, lookback_s, note))
+            table.append((name, every, ret, comment, human(refresh_s), note))
         else:
-            docs.append(tierN_task(name, every, prev))
+            table.append((name, every, ret, comment, "none",
+                          f"NO TASK: needs {K_WINDOWS}x{every} of traffic-{prev}"))
         prev = name
     out = "\n---\n".join(docs)
     with open("manifest.yml", "w") as f:
         f.write(out)
-    print(f"Wrote manifest.yml: {len(TIERS)} tiers x (1 bucket + 1 task), "
+    n_tasks = sum(1 for d in docs if d.lstrip().startswith("apiVersion")
+                  and "kind: Task" in d)
+    print(f"Wrote manifest.yml: {len(TIERS)} buckets, {n_tasks} tasks, "
           f"{len(AGGS)} aggregates each.")
+    print(f"{'tier':>6}  {'window':>7}  {'refresh':>8}  {'retention':>10}  "
+          f"{'rewrites':<28}  retention reason")
+    for name, every, ret, comment, refresh, note in table:
+        print(f"{name:>6}  {every:>7}  {refresh:>8}  {human(ret):>10}  "
+              f"{note:<28}  {comment}")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,30 @@
 Empirically verify that the cascade's min/max/median carry no burst information,
 because they are applied to a CUMULATIVE COUNTER rather than to a rate.
 
+*** READ THIS BEFORE INTERPRETING THE OUTPUT ***
+
+This is a FALSIFIER for the counter-mode cascade, written to prove that design
+broken. Since the 2026-08-08 rate-first migration the cascade stores aggregates
+of the RATE, so CHECK 2 and CHECK 3 are EXPECTED TO FAIL, and their failure is
+the evidence that the current pipeline is correct:
+
+    CHECK 2 reports MISMATCH  -> min != first sample, max != last sample,
+                                 i.e. min/max describe traffic, not the window's
+                                 edges. This is the desired result.
+    CHECK 3 reports DIFFERS   -> (max-min)/elapsed != the mean rate, i.e. the
+                                 extra aggregates carry information `mean` does
+                                 not. This is the desired result.
+
+"CLAIM CONFIRMED" on either check would mean the counter-mode bug is back.
+CHECK 0 (ingest redundancy, expect 1.00x) and CHECK 1 (raw counter monotone)
+are mode-independent and should still pass as written.
+
+Also note the WINDOW ALIGNMENT paragraph below is stale in one detail: tier
+points are now stamped at their window's START, not its STOP (uniform
+timeSrc: "_start", see generate_manifest.TIMESRC). The slicing here still
+reconstructs windows correctly because it slices by the window the stamp
+belongs to, but do not take the "(T-every, T]" wording as current.
+
 The claim (PROJECT_JOURNAL.md 12d), on a monotonically increasing series:
     min  == the counter value at the window's START
     max  == the counter value at the window's END

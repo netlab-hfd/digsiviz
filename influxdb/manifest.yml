@@ -6,9 +6,25 @@
 # mean/min/max/median over its window, writes suffixed fields (_mean/_min/_max/
 # _median) into its bucket.
 #
-# Retention rule: a tier's retention >= the `every` of the task that reads FROM
-# it, or the source expires before consumption. Each below = 2x that interval
-# (floored to InfluxDB's 3600s minimum). Init bucket "infldb"
+# Each task's SCHEDULE is independent of its WINDOW: it fires at most a day
+# apart and rewrites its last 2 closed windows every run. Rewrites are free
+# (`to()` overwrites on identical tags+field+timestamp), so a run missed during
+# an outage is repaired by the next one, and a tier whose window is measured in
+# years is populated from its first day instead of after a decade of uptime.
+# Only CLOSED windows are published — never the one the present sits inside.
+#
+# All aggregates are stamped at their window's START (timeSrc: "_start"),
+# uniformly, at every tier: with the default stop-stamping each stage silently
+# dropped the source point landing on its closing boundary.
+#
+# Retention is DERIVED, two terms, whichever is larger:
+#   pipeline = 2 windows of the task that READS this tier, so the windows it
+#              rewrites are still here (dropped where that task is slower than
+#              the 10y horizon and so never fires in practice);
+#   coverage = 24 points at this tier's own resolution, capped at the 10y
+#              horizon — the term the granularity argument actually asks for.
+# Floored to InfluxDB's 3600s minimum. The terminal tier carries no
+# retentionRules at all, i.e. infinite. Init bucket "infldb"
 # (DOCKER_INFLUXDB_INIT_BUCKET) is the raw source — not defined here.
 
 ---
@@ -25,7 +41,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 3600   # floored to InfluxDB 1h minimum (2x rule -> 600s, rejected)
+      everySeconds: 3600   # floored to InfluxDB 1h minimum (coverage: 24 points at 1m resolution -> 1440s)
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -50,22 +66,22 @@ spec:
       |> range(start: -task.every)
 
     rate
-      |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 1m, fn: mean, createEmpty: false, timeSrc: "_start")
       |> map(fn: (r) => ({r with _field: r._field + "_mean"}))
       |> to(bucket: "traffic-1m")
 
     rate
-      |> aggregateWindow(every: 1m, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 1m, fn: min, createEmpty: false, timeSrc: "_start")
       |> map(fn: (r) => ({r with _field: r._field + "_min"}))
       |> to(bucket: "traffic-1m")
 
     rate
-      |> aggregateWindow(every: 1m, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 1m, fn: max, createEmpty: false, timeSrc: "_start")
       |> map(fn: (r) => ({r with _field: r._field + "_max"}))
       |> to(bucket: "traffic-1m")
 
     rate
-      |> aggregateWindow(every: 1m, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 1m, fn: median, createEmpty: false, timeSrc: "_start")
       |> map(fn: (r) => ({r with _field: r._field + "_median"}))
       |> to(bucket: "traffic-1m")
 
@@ -83,7 +99,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 7200   # 2h = 2x the 1h consuming task
+      everySeconds: 7200   # coverage: 24 points at 5m resolution
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -92,33 +108,44 @@ metadata:
   name: downsample-1m-to-5m
 spec:
   name: downsample-1m-to-5m
-  description: Downsamples the 1m tier to 5m (mean/min/max/median cascade).
-  every: 5m
+  description: >-
+    Downsamples the 1m tier to 5m (mean/min/max/median cascade).
+    Refreshes every 300s and rewrites 2 closed window(s) of 5m, so a run missed
+    during an outage is repaired by the next one.
+  every: 300s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 5m)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 600s)
+
     src = from(bucket: "traffic-1m")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 5m, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-5m")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 5m, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 5m, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-5m")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 5m, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 5m, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-5m")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 5m, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 5m, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-5m")
 
 ---
@@ -135,7 +162,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 57600   # 16h = 2x the 8h consuming task
+      everySeconds: 86400   # coverage: 24 points at 1h resolution
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -144,33 +171,44 @@ metadata:
   name: downsample-5m-to-1h
 spec:
   name: downsample-5m-to-1h
-  description: Downsamples the 5m tier to 1h (mean/min/max/median cascade).
-  every: 1h
+  description: >-
+    Downsamples the 5m tier to 1h (mean/min/max/median cascade).
+    Refreshes every 3600s and rewrites 2 closed window(s) of 1h, so a run missed
+    during an outage is repaired by the next one.
+  every: 3600s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 1h)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 7200s)
+
     src = from(bucket: "traffic-5m")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 1h, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1h")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 1h, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 1h, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1h")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 1h, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 1h, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1h")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 1h, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 1h, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1h")
 
 ---
@@ -187,7 +225,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 172800   # 2d = 2x the 1d consuming task
+      everySeconds: 691200   # coverage: 24 points at 8h resolution
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -196,33 +234,44 @@ metadata:
   name: downsample-1h-to-8h
 spec:
   name: downsample-1h-to-8h
-  description: Downsamples the 1h tier to 8h (mean/min/max/median cascade).
-  every: 8h
+  description: >-
+    Downsamples the 1h tier to 8h (mean/min/max/median cascade).
+    Refreshes every 28800s and rewrites 2 closed window(s) of 8h, so a run missed
+    during an outage is repaired by the next one.
+  every: 28800s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 8h)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 57600s)
+
     src = from(bucket: "traffic-1h")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 8h, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 8h, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-8h")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 8h, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 8h, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-8h")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 8h, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 8h, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-8h")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 8h, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 8h, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-8h")
 
 ---
@@ -239,7 +288,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 1209600   # 2w = 2x the 1w consuming task
+      everySeconds: 2073600   # coverage: 24 points at 1d resolution
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -248,33 +297,44 @@ metadata:
   name: downsample-8h-to-1d
 spec:
   name: downsample-8h-to-1d
-  description: Downsamples the 8h tier to 1d (mean/min/max/median cascade).
-  every: 1d
+  description: >-
+    Downsamples the 8h tier to 1d (mean/min/max/median cascade).
+    Refreshes every 86400s and rewrites 2 closed window(s) of 1d, so a run missed
+    during an outage is repaired by the next one.
+  every: 86400s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 1d)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 172800s)
+
     src = from(bucket: "traffic-8h")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 1d, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 1d, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1d")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 1d, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 1d, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1d")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 1d, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 1d, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1d")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 1d, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 1d, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1d")
 
 ---
@@ -291,7 +351,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 4838400   # 8w = 2x the 4w consuming task
+      everySeconds: 14515200   # coverage: 24 points at 1w resolution
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -300,33 +360,44 @@ metadata:
   name: downsample-1d-to-1w
 spec:
   name: downsample-1d-to-1w
-  description: Downsamples the 1d tier to 1w (mean/min/max/median cascade).
-  every: 1w
+  description: >-
+    Downsamples the 1d tier to 1w (mean/min/max/median cascade).
+    Refreshes every 86400s and rewrites 2 closed window(s) of 1w, so a run missed
+    during an outage is repaired by the next one.
+  every: 86400s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 1w)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 1209600s)
+
     src = from(bucket: "traffic-1d")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 1w, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 1w, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 1w, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 1w, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 1w, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 1w, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 1w, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 1w, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-1w")
 
 ---
@@ -343,7 +414,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 14515200   # 24w = 2x the 12w consuming task
+      everySeconds: 58060800   # coverage: 24 points at 4w resolution
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -352,33 +423,44 @@ metadata:
   name: downsample-1w-to-4w
 spec:
   name: downsample-1w-to-4w
-  description: Downsamples the 1w tier to 4w (mean/min/max/median cascade).
-  every: 4w
+  description: >-
+    Downsamples the 1w tier to 4w (mean/min/max/median cascade).
+    Refreshes every 86400s and rewrites 2 closed window(s) of 4w, so a run missed
+    during an outage is repaired by the next one.
+  every: 86400s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 4w)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 4838400s)
+
     src = from(bucket: "traffic-1w")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 4w, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 4w, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-4w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 4w, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 4w, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-4w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 4w, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 4w, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-4w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 4w, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 4w, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-4w")
 
 ---
@@ -395,7 +477,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 29030400   # 48w = 2x the 24w consuming task
+      everySeconds: 174182400   # coverage: 24 points at 12w resolution
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -404,33 +486,44 @@ metadata:
   name: downsample-4w-to-12w
 spec:
   name: downsample-4w-to-12w
-  description: Downsamples the 4w tier to 12w (mean/min/max/median cascade).
-  every: 12w
+  description: >-
+    Downsamples the 4w tier to 12w (mean/min/max/median cascade).
+    Refreshes every 86400s and rewrites 2 closed window(s) of 12w, so a run missed
+    during an outage is repaired by the next one.
+  every: 86400s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 12w)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 14515200s)
+
     src = from(bucket: "traffic-4w")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 12w, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 12w, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-12w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 12w, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 12w, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-12w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 12w, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 12w, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-12w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 12w, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 12w, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-12w")
 
 ---
@@ -447,7 +540,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 62899200   # ~2y = 2x the 52w consuming task
+      everySeconds: 314496000   # coverage: capped at the 10y horizon
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -456,33 +549,44 @@ metadata:
   name: downsample-12w-to-24w
 spec:
   name: downsample-12w-to-24w
-  description: Downsamples the 12w tier to 24w (mean/min/max/median cascade).
-  every: 24w
+  description: >-
+    Downsamples the 12w tier to 24w (mean/min/max/median cascade).
+    Refreshes every 86400s and rewrites 2 closed window(s) of 24w, so a run missed
+    during an outage is repaired by the next one.
+  every: 86400s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 24w)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 29030400s)
+
     src = from(bucket: "traffic-12w")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 24w, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 24w, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-24w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 24w, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 24w, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-24w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 24w, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 24w, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-24w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 24w, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 24w, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-24w")
 
 ---
@@ -499,7 +603,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 314496000   # ~10y = 2x the 260w consuming task
+      everySeconds: 314496000   # coverage: capped at the 10y horizon
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -508,33 +612,44 @@ metadata:
   name: downsample-24w-to-52w
 spec:
   name: downsample-24w-to-52w
-  description: Downsamples the 24w tier to 52w (mean/min/max/median cascade).
-  every: 52w
+  description: >-
+    Downsamples the 24w tier to 52w (mean/min/max/median cascade).
+    Refreshes every 86400s and rewrites 2 closed window(s) of 52w, so a run missed
+    during an outage is repaired by the next one.
+  every: 86400s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 52w)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 62899200s)
+
     src = from(bucket: "traffic-24w")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 52w, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 52w, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-52w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 52w, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 52w, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-52w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 52w, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 52w, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-52w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 52w, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 52w, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-52w")
 
 ---
@@ -551,7 +666,7 @@ spec:
     multiply by 8 for bits/s and must NOT apply derivative().
   retentionRules:
     - type: expire
-      everySeconds: 628992000   # ~20y = 2x the 520w consuming task
+      everySeconds: 314496000   # coverage: capped at the 10y horizon
 
 ---
 apiVersion: influxdata.com/v2alpha1
@@ -560,33 +675,44 @@ metadata:
   name: downsample-52w-to-260w
 spec:
   name: downsample-52w-to-260w
-  description: Downsamples the 52w tier to 260w (mean/min/max/median cascade).
-  every: 260w
+  description: >-
+    Downsamples the 52w tier to 260w (mean/min/max/median cascade).
+    Refreshes every 86400s and rewrites 1 closed window(s) of 260w, clamped by retention, so a run missed
+    during an outage is repaired by the next one.
+  every: 86400s
   offset: 30s
   query: |
 
+    // Last CLOSED window boundary, epoch-aligned exactly as aggregateWindow
+    // grids its own windows. now() is pinned to the task's scheduled time, so
+    // this is deterministic and identical across retries.
+    w     = int(v: 260w)
+    n     = int(v: now())
+    stop  = n - n % w
+    start = stop - int(v: 157248000s)
+
     src = from(bucket: "traffic-52w")
-      |> range(start: -task.every)
+      |> range(start: time(v: start), stop: time(v: stop))
       |> filter(fn: (r) => r._measurement == "network_interface")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 260w, fn: mean, createEmpty: false)
+      |> aggregateWindow(every: 260w, fn: mean, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-260w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 260w, fn: min, createEmpty: false)
+      |> aggregateWindow(every: 260w, fn: min, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-260w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 260w, fn: max, createEmpty: false)
+      |> aggregateWindow(every: 260w, fn: max, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-260w")
 
     src
       |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 260w, fn: median, createEmpty: false)
+      |> aggregateWindow(every: 260w, fn: median, createEmpty: false, timeSrc: "_start")
       |> to(bucket: "traffic-260w")
 
 ---
@@ -600,43 +726,5 @@ spec:
     Traffic RATES in octets/s at 520w resolution, stored as
     mean/min/max/median fields. NOT counters: the rate is derived on a
     2s lattice before the first aggregation, so consumers must
-    multiply by 8 for bits/s and must NOT apply derivative().
-  retentionRules:
-    - type: expire
-      everySeconds: 314496000   # ~10y terminal tier, no downstream task
-
----
-apiVersion: influxdata.com/v2alpha1
-kind: Task
-metadata:
-  name: downsample-260w-to-520w
-spec:
-  name: downsample-260w-to-520w
-  description: Downsamples the 260w tier to 520w (mean/min/max/median cascade).
-  every: 520w
-  offset: 30s
-  query: |
-
-    src = from(bucket: "traffic-260w")
-      |> range(start: -task.every)
-      |> filter(fn: (r) => r._measurement == "network_interface")
-
-    src
-      |> filter(fn: (r) => r._field == "statistics_out-octets_mean" or r._field == "statistics_in-octets_mean")
-      |> aggregateWindow(every: 520w, fn: mean, createEmpty: false)
-      |> to(bucket: "traffic-520w")
-
-    src
-      |> filter(fn: (r) => r._field == "statistics_out-octets_min" or r._field == "statistics_in-octets_min")
-      |> aggregateWindow(every: 520w, fn: min, createEmpty: false)
-      |> to(bucket: "traffic-520w")
-
-    src
-      |> filter(fn: (r) => r._field == "statistics_out-octets_max" or r._field == "statistics_in-octets_max")
-      |> aggregateWindow(every: 520w, fn: max, createEmpty: false)
-      |> to(bucket: "traffic-520w")
-
-    src
-      |> filter(fn: (r) => r._field == "statistics_out-octets_median" or r._field == "statistics_in-octets_median")
-      |> aggregateWindow(every: 520w, fn: median, createEmpty: false)
-      |> to(bucket: "traffic-520w")
+    multiply by 8 for bits/s and must NOT apply derivative(). NO cascade task writes this tier: a 520w-wide window cannot fit inside the source tier's retention, so it would only ever be summarised from a fraction of itself. Populated by backfill.py.
+  # retention: infinite: terminal tier, no consumer and no coarser fallback

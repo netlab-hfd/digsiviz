@@ -51,20 +51,28 @@ CONTAINER = "influxdb"
 NOW = int(time.time())
 
 # (bucket, step_seconds, span_seconds) — span kept <= bucket retention.
-# retention values come from influxdb/manifest.yml.
+# Retentions come from influxdb/manifest.yml and are DERIVED there by
+# generate_manifest.retention(); run `python3 generate_manifest.py` to print the
+# current table and re-sync the spans below if the tier ladder ever changes.
+#
+# Spans == retention, so every tier is backfilled across exactly as much history
+# as it is allowed to keep. Under the old scheduler-derived retentions most tiers
+# could only hold enough history to feed the next task (the 1h tier: 16h), which
+# made the scroll jump straight from hours to years; the coverage term now gives
+# each tier ~24 points of its own, so the time machine degrades smoothly.
 TIERS = [
-    ("traffic-1m",   60,           3600),          # 1m res,  last 1h   (ret 1h)
-    ("traffic-5m",   300,          7200),          # 5m res,  last 2h   (ret 2h)
-    ("traffic-1h",   3600,         57600),         # 1h res,  last 16h  (ret 16h)
-    ("traffic-8h",   28800,        172800),        # 8h res,  last 2d   (ret 2d)
-    ("traffic-1d",   86400,        1209600),       # 1d res,  last 2w   (ret 2w)
-    ("traffic-1w",   604800,       4838400),       # 1w res,  last 8w   (ret 8w)
-    ("traffic-4w",   2419200,      14515200),      # 4w res,  last 24w  (ret 24w)
-    ("traffic-12w",  7257600,      29030400),      # 12w res, last 48w  (ret 48w)
-    ("traffic-24w",  14515200,     62899200),      # 24w res, last ~2y  (ret ~2y)
-    ("traffic-52w",  31449600,     314496000),     # 52w res, last ~10y (ret ~10y)
-    ("traffic-260w", 157248000,    628992000),     # 5y res,  last ~20y (ret ~20y)
-    ("traffic-520w", 314496000,    314496000),     # 10y res, last ~10y (ret ~10y)
+    ("traffic-1m",   60,           3600),          # 1m res,  last 1h    (ret 1h)
+    ("traffic-5m",   300,          7200),          # 5m res,  last 2h    (ret 2h)
+    ("traffic-1h",   3600,         86400),         # 1h res,  last 1d    (ret 1d)
+    ("traffic-8h",   28800,        691200),        # 8h res,  last 8d    (ret 8d)
+    ("traffic-1d",   86400,        2073600),       # 1d res,  last 24d   (ret 24d)
+    ("traffic-1w",   604800,       14515200),      # 1w res,  last 24w   (ret 24w)
+    ("traffic-4w",   2419200,      58060800),      # 4w res,  last ~1.8y (ret ~1.8y)
+    ("traffic-12w",  7257600,      174182400),     # 12w res, last ~5.5y (ret ~5.5y)
+    ("traffic-24w",  14515200,     314496000),     # 24w res, last ~10y  (ret ~10y)
+    ("traffic-52w",  31449600,     314496000),     # 52w res, last ~10y  (ret ~10y)
+    ("traffic-260w", 157248000,    314496000),     # 5y res,  last ~10y  (ret ~10y)
+    ("traffic-520w", 314496000,    314496000),     # 10y res, last ~10y  (ret infinite)
 ]
 
 # a couple of interfaces so the twin view looks populated
@@ -112,11 +120,20 @@ def aggregates(x0, x1, phase, spike):
 def build_lines(step, span):
     lines = []
     n = max(1, span // step)
+    # Same epoch-aligned grid aggregateWindow uses, so backfilled points land on
+    # the boundaries the cascade would have written to rather than between them.
+    base = (NOW // step) * step
+    # Snap the span to a whole number of windows: where retention is not an
+    # exact multiple of the step (traffic-24w), base - span would otherwise sit
+    # off-grid and every point with it.
+    span = n * step
     for si, (host, intf, ip) in enumerate(SERIES):
         for i in range(n):
-            # +step so the oldest point sits strictly INSIDE the retention
-            # window; a point exactly on the lower bound is rejected.
-            ts = NOW - span + (i + 1) * step
+            # Stamped at the window's START, matching the cascade's uniform
+            # timeSrc: "_start" (see generate_manifest.TIMESRC). Starting at
+            # i+1 keeps the oldest point strictly INSIDE the retention window;
+            # a point exactly on the lower bound is rejected as expired.
+            ts = base - span + (i + 1) * step
             # The spike occupies part of ONE window, so that window's max is
             # well above its mean -- which is the whole point of storing both.
             spike = n > 4 and i == n // 2
