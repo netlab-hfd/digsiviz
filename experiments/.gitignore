@@ -1,0 +1,21 @@
+# Raw per-flow iperf3 output — bulky (E2 2h run ≈ 67 MB), regenerable.
+# Analysis (analyze_e1.py / analyze_e2.py) reads these; the derived summaries
+# and the per-second CPU logs are what we keep.
+*_flow*.json
+*.err
+
+# Run transcripts (stdout of a driver) — not measurements.
+rep*.log
+*_run.log
+e2_2h.log
+alignment_run.log
+blindness_run.log
+
+# Python caches
+__pycache__/
+*.pyc
+
+# The repo-root .gitignore has a blanket `*.log` (Node template) that also
+# swallows E1/E2's CPU-over-time logs — those ARE the measurement, keep them.
+!*_hostcpu.log
+!*_containercpu.log

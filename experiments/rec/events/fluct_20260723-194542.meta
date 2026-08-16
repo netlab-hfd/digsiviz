@@ -1,0 +1,51 @@
+type=fluct
+start_epoch=1784828744
+duration=900
+base_rate=4000000
+flow_rate=1512000
+arrival slot=0 len=20s t=+18s
+arrival slot=1 len=12s t=+37s
+arrival slot=2 len=11s t=+38s
+arrival slot=0 len=22s t=+44s
+arrival slot=3 len=45s t=+48s
+arrival slot=1 len=12s t=+50s
+arrival slot=2 len=34s t=+52s
+arrival slot=0 len=39s t=+73s
+arrival slot=1 len=30s t=+96s
+arrival slot=2 len=35s t=+97s
+arrival slot=0 len=24s t=+124s
+arrival slot=1 len=12s t=+139s
+arrival slot=0 len=13s t=+179s
+arrival slot=1 len=13s t=+187s
+arrival slot=0 len=41s t=+203s
+arrival slot=1 len=23s t=+219s
+arrival slot=2 len=34s t=+230s
+arrival slot=1 len=34s t=+243s
+arrival slot=0 len=36s t=+314s
+arrival slot=1 len=23s t=+315s
+arrival slot=0 len=14s t=+387s
+arrival slot=0 len=36s t=+406s
+arrival slot=1 len=20s t=+433s
+arrival slot=0 len=25s t=+480s
+arrival slot=0 len=25s t=+526s
+arrival slot=1 len=38s t=+545s
+arrival slot=0 len=45s t=+560s
+arrival slot=2 len=19s t=+576s
+arrival slot=3 len=42s t=+577s
+arrival slot=0 len=39s t=+608s
+arrival slot=1 len=38s t=+623s
+arrival slot=0 len=31s t=+655s
+arrival slot=1 len=21s t=+678s
+arrival slot=0 len=35s t=+703s
+arrival slot=1 len=32s t=+717s
+arrival slot=0 len=14s t=+740s
+arrival slot=2 len=14s t=+742s
+arrival slot=0 len=37s t=+785s
+arrival slot=1 len=33s t=+804s
+arrival slot=2 len=18s t=+808s
+arrival slot=0 len=17s t=+824s
+arrival slot=2 len=16s t=+832s
+arrival slot=0 len=33s t=+851s
+arrival slot=1 len=21s t=+857s
+arrival slot=0 len=8s t=+892s
+end_epoch=1784829644

@@ -23,6 +23,7 @@ layer and gNMI for realtime data retrieval.
   - [Verify InfluxDB](#verify-influxdb)
   - [Saturation test (iperf3)](#saturation-test-iperf3)
   - [Grafana](#grafana)
+  - [Historical backfill (time-machine test)](#historical-backfill-time-machine-test)
   - [Teardown](#teardown)
 
 ---
@@ -378,54 +379,166 @@ Start the iperf3 server on `h2` (runs detached, produces no terminal output):
 sudo docker exec -d clab-ma-fp-stumpf-h2 iperf3 -s
 ```
 
-Run the client on `h1` for 60s:
+Run the client on `h1`. **Always pace with `-b`** (see below):
 
 ```bash
-sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -c 10.0.2.102 -t 60
+sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -c 10.0.2.102 -t 60 -b 40M
 ```
+
+### Always pace the load: `-b 40M`
+
+**An unpaced `iperf3 -c ... -t 60` does not work on this lab.** It either stalls
+completely (transfer in the first interval, then `0.00 bits/sec` forever, receiver
+total 0 bytes) or delivers ~50–65 Mbit/s while bleeding hundreds of retransmits.
+Both are the same cause: all clab containers run on one Docker host and SRLinux
+forwards **in software**, so above a threshold the path drops packets and TCP —
+by design — backs off toward zero.
+
+`-b` rate-limits TCP too (application-level pacing). Staying below the loss
+threshold, TCP never sees loss, so it never backs off, and every interval
+transfers:
+
+```
+30s @ -b 40M  →  40.0 Mbit/s, 1 retransmit, sender = receiver = 143 MB
+```
+
+**Measured capacity of the h1→r1→r2→h2 path** (10s runs):
+
+| Offered | Retransmits | Receiver loss |
+|---|---|---|
+| 5M / 10M / 20M / 40M | 0 | 0.0 % |
+| 45M | 1 | 0.0 % |
+| 50M | 4 | 0.0 % |
+| 55M | 228 | 3.3 % |
+| 80M | 306 | 4.0 % — *and delivers less than 60M did* |
+
+**The knee is ~50–55 Mbit/s; use `-b 40M` as the standard load.** Note this is a
+property of *this host*, not of the topology — re-measure on different hardware.
+
+> MTU is **not** involved. `-M`/`-l` (MSS clamping) makes no difference: clamping
+> without pacing still yields 597 retransmits, while pacing without clamping is
+> perfectly clean. Nokia's reference lab uses `-M 1480 -l 1480`, but only its
+> `-b` matters here.
+
+### UDP, and why replay needs it
+
+For **replay** (Task E), UDP is required rather than merely convenient. Paced TCP
+still owns its own congestion control, so it will not obey a target rate under
+loss; UDP ignores congestion control and emits a fixed offered rate, so a recorded
+curve can be *dictated*:
+
+```bash
+sudo docker exec -it clab-ma-fp-stumpf-h1 iperf3 -u -c 10.0.2.102 -b 40M -t 20
+```
+
+The receiver line reports loss %. This `-b <bitrate>` mechanism is how recorded
+traffic is replayed into the twin (read a stored bitrate from InfluxDB, drive
+`iperf3 -u -b <that rate>`). Keep replayed rates **below the ~50 Mbit/s knee**, or
+the twin's forwarding capacity — not the storage granularity — becomes the thing
+limiting fidelity.
 
 [↑ Back to top](#top)
 
 ## Grafana
 
-The InfluxDB data source and the traffic dashboard are **provisioned
-automatically** at startup — no manual UI clicking. `docker/docker-compose.yml`
-mounts `grafana/provisioning/` into the container and passes the InfluxDB
-org/token/bucket from `docker/.env`:
+Open <http://localhost:3000>, log in with `admin` / `admin`. The InfluxDB data
+source and both dashboards are **provisioned automatically** at startup — no
+manual UI clicking, nothing to import.
 
-- `grafana/provisioning/datasources/influxdb.yml` — InfluxDB data source
-  (Flux, `uid: influxdb`, url `http://influxdb:8086`).
-- `grafana/provisioning/dashboards/dashboards.yml` — file-based dashboard
-  provider.
-- `grafana/provisioning/dashboards/traffic.json` — dashboard **DigSiViz
-  Traffic** with two panels (outbound / inbound bits/s).
+- **DigSiViz Traffic** — live per-second rates (top row, last 15m) plus the
+  time machine over the 12 downsample tiers (bottom row, `Tier` dropdown).
+- **DigSiViz Topology** — the topology weathermap: links coloured and labelled
+  by bit rate, with a time slider to scrub through history and a
+  `Granularity tier` dropdown to switch resolution.
 
-Open http://localhost:3000, log in with `admin` / `admin`, and open the
-**DigSiViz Traffic** dashboard. During an iperf3 run the interface carrying the
-traffic spikes; each series is labelled by its `hostname` and `interface_name`
-tags.
+> If a panel looks empty, check the time range **matches the tier** you selected
+> — `traffic-52w` holds points a year apart, so `now-60d` shows nothing. And at
+> genuine idle the weathermap correctly reads `0 b/s` between counter steps; use
+> the **"Where is the traffic?"** strip under it to find the bursts.
 
-### The panel queries (reference)
+**For how any of this works** — what is plugged into Grafana, the flow-panel
+weathermap, the Flux naming contract, the srl-telemetry-lab provenance, the
+version policy, and how to regenerate the topology — see
+**[`grafana/README.md`](grafana/README.md)**.
 
-The panels run these Flux queries — outbound uses `statistics_out-octets`,
-inbound `statistics_in-octets`:
+[↑ Back to top](#top)
 
-```flux
-from(bucket: "infldb")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "network_interface")
-  |> filter(fn: (r) => r._field == "statistics_out-octets")
-  |> derivative(unit: 1s, nonNegative: true)
-  |> map(fn: (r) => ({r with _value: r._value * 8.0}))
+
+## Historical backfill (time-machine test)
+
+The downsample **tasks only process recent data going forward**, and the raw
+`infldb` bucket retains only ~1h. They will never build up years of history on
+their own. To test that the tier buckets and the Grafana time machine actually
+render multi-year data, seed the tiers with synthetic backdated points using
+`influxdb/backfill.py`:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/influxdb"
+python3 backfill.py
 ```
 
-What each line does:
-- `range(...)` — limits results to the dashboard's selected time window.
-- `filter _measurement` — keeps only interface data.
-- `filter _field` — selects the cumulative "bytes sent" counter.
-- `derivative(unit: 1s, nonNegative: true)` — turns the ever-increasing counter
-  into a per-second rate (bytes/s) and ignores counter resets.
-- `map(... * 8.0)` — converts bytes/s to bits/s.
+Writes synthetic **rate** points (octets/s) directly into each tier bucket,
+bypassing the cascade, so the Grafana panels render unchanged. Idempotent. It is
+a mechanics test of the buckets + time machine, **not** the research pipeline.
+Details and constraints are documented in `influxdb/backfill.py`'s header.
+
+Verify it worked:
+
+```bash
+# any tier has data spanning years:
+docker exec influxdb influx query 'from(bucket:"traffic-52w") |> range(start:-15y) |> count()' --org myorg --token mytoken
+```
+
+Then open the **DigSiViz Traffic** dashboard (defaults to a `now-5y` window):
+recent time shows the dense `raw`/`1m` series, older time shows the sparse
+coarse tiers — the granularity design made visible.
+
+### How the buckets get emptied (and how to refill them)
+
+InfluxDB data lives in the named volumes `influxdb-data` / `influxdb-config`, so
+`docker compose down` / `up` is **safe**. Two things still clear the tiers:
+
+1. **`docker compose down -v`** — removes the volumes, and with them every
+   bucket. This is also the only way to change
+   `DOCKER_INFLUXDB_INIT_RETENTION` (the raw `infldb` retention), which applies
+   at **init** only.
+2. **`influx apply` recreating a bucket.** Re-applying an *unchanged* manifest is
+   safe — `influx-setup` runs on every `docker compose up` and leaves row counts
+   untouched. But any manifest edit that touches a bucket spec recreates that
+   bucket and drops its data.
+
+```bash
+# refill after either of the above
+cd "$(git rev-parse --show-toplevel)/influxdb"
+python3 backfill.py
+```
+
+> Before named volumes existed, *all* InfluxDB data sat in the container's
+> writable layer, so a plain `docker compose down` — no `-v` — destroyed every
+> bucket. If you are on an older checkout, that is why your data keeps vanishing.
+
+### Regenerating the downsample manifest
+
+`influxdb/manifest.yml` (buckets + downsample tasks) is **generated**, not
+hand-edited — hand-maintaining 12+ near-identical Flux blocks is error-prone.
+Edit the tier table or aggregate list in `influxdb/generate_manifest.py` and
+regenerate:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/influxdb"
+python3 generate_manifest.py       # rewrites manifest.yml, prints the tier table
+```
+
+It prints the derived schedule/retention table it just wrote — the quickest way
+to see the current ladder without reading the YAML.
+
+Each tier stores `mean`, `min`, `max` and `median` as separate field suffixes
+(`statistics_out-octets_mean`, `_min`, `_max`, `_median`), holding **rates in
+octets/s** — do not apply `derivative()` to a tier bucket.
+
+Retention, task schedules and the timestamp convention are all *derived* rather
+than written down. The rules, and the reasons behind them, are documented at the
+top of `influxdb/generate_manifest.py`.
 
 [↑ Back to top](#top)
 
@@ -441,14 +554,25 @@ cd "$(git rev-parse --show-toplevel)"
 sudo clab destroy -t backend/ma-fp-stumpf.clab.yml
 ```
 
-3) Stop the services (add `-v` to also remove the Grafana volume):
+3) Stop the services:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)/docker"
 docker compose down
 ```
 
-InfluxDB has no persistent volume, so its stored metrics are discarded whenever
-its container is recreated. Re-running the pipeline repopulates the bucket.
+A plain `docker compose down` is **safe**: InfluxDB and Grafana both use named
+volumes (`influxdb-data`, `influxdb-config`, `grafana-storage`), so buckets,
+downsample tasks, backfilled history and Grafana's own state all survive a
+`down`/`up` cycle.
+
+> **Do not add `-v` unless you mean it.** `docker compose down -v` removes those
+> volumes, and with them **every bucket and all stored metrics** — the raw
+> bucket, all 12 tier buckets, and the multi-year backfill. Recovering means
+> re-running `influxdb/backfill.py` and waiting for the cascade to refill the
+> fine tiers. Grafana itself re-provisions from files (see
+> [Grafana](#grafana)), so nothing there is lost, but
+> the metrics are gone. `-v` is only useful for a genuinely clean start, e.g.
+> clearing stale ZooKeeper/Kafka state.
 
 [↑ Back to top](#top)

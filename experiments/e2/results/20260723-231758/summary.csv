@@ -1,0 +1,2 @@
+duration_s,rep,mean_mbps,drift_mbps_per_h,q1_mean_mbps,q4_mean_mbps,host_cpu_pct,host_cpu_pct_per_h
+7200,1,10.000,-0.0000,10.000,10.000,13.83,-4.01

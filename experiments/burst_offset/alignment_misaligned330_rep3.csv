@@ -1,0 +1,4 @@
+event,tier,lag_s,nrmse_pct,mae_pct,mean_ratio,max_ratio,std_ratio
+burst,0,4,3.557,1.633,1.0275,1.0322,1.0087
+burst,60,-28,12.267,5.811,1.0294,0.7299,0.7227
+burst,300,60,15.334,8.701,1.0332,0.6121,0.4136

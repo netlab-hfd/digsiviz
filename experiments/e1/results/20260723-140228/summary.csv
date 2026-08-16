@@ -1,0 +1,4 @@
+n_flows,reps,achieved_mbps_mean,achieved_mbps_std,achieved_pct_mean,achieved_pct_std,loss_pct_mean,loss_pct_std,worst_flow_pct_mean,worst_flow_pct_std,host_cpu_pct_mean,host_cpu_pct_std
+50,1,10.00,0.00,100.01,0.00,0.00,0.00,100.01,0.00,17.51,0.00
+100,1,10.00,0.00,100.01,0.00,0.00,0.00,100.00,0.00,14.77,0.00
+200,1,10.00,0.00,100.01,0.00,0.00,0.00,100.00,0.00,17.17,0.00

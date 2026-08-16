@@ -33,6 +33,11 @@ def clab_info():
 
 @socketio.on('connect')
 def handle_connect():
+    # NOTE: this condition checks whether the *time machine* is active, not
+    # whether a poller is already running, so it does not prevent a second
+    # polling loop. The guard that does lives in TimeMachine.get_router_values
+    # (see _poller_running there) -- without it every gNMI poll was written to
+    # InfluxDB twice.
     if not timemachine.time_machine_state['active']:
         print("Client connected, starting polling...")
         socketio.start_background_task(timemachine.get_router_values)
@@ -57,4 +62,19 @@ def handle_timemachine(data):
 
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+    # use_reloader=False is load-bearing, not a style choice.
+    #
+    # debug=True switches on the Werkzeug reloader, which forks a child process
+    # that re-imports this module. The module-level
+    # threading.Thread(target=timemachine.get_router_values).start() above then
+    # runs in BOTH processes, each with its own GnmiClient and its own Kafka
+    # producer, so every gNMI poll is published twice. Measured: 3.93 points/s
+    # per series where 0.5s polling gives 2.0 -> the 2.00x storage redundancy.
+    # Verified by the child carrying WERKZEUG_RUN_MAIN=true with the parent as
+    # its PPID.
+    #
+    # Note the factor is exactly 2 and does not grow with connected clients,
+    # because time_machine_lock is held across the sleep in
+    # TimeMachine.time_machine(): any number of poller loops WITHIN one process
+    # is throttled to one poll per 0.5s. Only extra processes duplicate writes.
+    socketio.run(app, debug=True, use_reloader=False, allow_unsafe_werkzeug=True)

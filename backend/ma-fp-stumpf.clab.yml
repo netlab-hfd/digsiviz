@@ -57,10 +57,19 @@ topology:
       startup-config: config/r3-bgp.cfg
       exec:
         - sr_cli -ec "/system grpc-server mgmt rate-limit 65535"
+    # MTU 1500 on eth1: docker gives these hosts a 9500 (jumbo) eth1, but the
+    # SR Linux subinterfaces have ip-mtu 1500. Without this the hosts emit
+    # frames the routers silently drop: TCP connects (small handshake) then
+    # stalls with "receiver 0.00 Bytes", and iperf3 sizes UDP datagrams from
+    # the local MTU (~9021 B) so they blackhole too. PMTUD masks it once the
+    # route cache learns 1500, which is why the failure looks intermittent and
+    # disappears after a warm run. `ping -M do -s 1472` cannot detect this —
+    # 1500 B is exactly the size that still passes.
     h1:
       kind: linux
       group: hosts
       exec:
+        - ip link set eth1 mtu 1500
         - ip addr add 10.0.1.101/24 dev eth1
         - ip route del default
         - ip route add default via 10.0.1.1
@@ -68,6 +77,7 @@ topology:
       kind: linux
       group: hosts
       exec:
+        - ip link set eth1 mtu 1500
         - ip addr add 10.0.2.102/24 dev eth1
         - ip route del default
         - ip route add default via 10.0.2.1
@@ -75,6 +85,7 @@ topology:
       kind: linux
       group: hosts
       exec:
+        - ip link set eth1 mtu 1500
         - ip addr add 10.0.3.103/24 dev eth1
         - ip route del default
         - ip route add default via 10.0.3.1

@@ -11,12 +11,33 @@ class TimeMachine():
     """
     Stores gNMI data that were fetched by GnmiClient object
     """
-    time_machine_deque = deque(maxlen=1)  
+    time_machine_deque = deque(maxlen=1)
     time_machine_lock = threading.Lock()
     time_machine_state = {
     'timestamp': None,
     'active': False
     }
+
+    # Only one polling loop may ever run.
+    #
+    # get_router_values() is an infinite loop and it has two callers: main.py
+    # starts a thread with it at import time, and the socketio 'connect' handler
+    # starts a second one as a background task. The condition guarding that
+    # second start tests time_machine_state['active'] -- whether the *time
+    # machine* is active -- not whether a poller is already polling, so as soon
+    # as a client connected there were two loops calling
+    # get_structured_data_parallel() at 0.5s each.
+    #
+    # Effect on the data: every gNMI poll was published to Kafka twice, so each
+    # series arrived at 4.0 points/s where 0.5s polling gives 2.0 (measured
+    # 2.00x storage redundancy). time_machine_lock serialises the two loops, so
+    # the duplicates land ~90ms apart -- the poll duration -- followed by a
+    # ~410ms gap, which is exactly the observed timestamp signature. The
+    # duplicates also break a per-sample derivative(): consecutive points carry
+    # an identical counter value, so the rate alternates between 0 and the true
+    # rate, biasing mean-of-rates low.
+    _poller_lock = threading.Lock()
+    _poller_running = False
 
     time_machine_deque_copy = None
 
@@ -67,7 +88,15 @@ class TimeMachine():
     def get_router_values(self):
         """
         Controls the time machine functionality depending on the currently set mode (current value or historical value). Emits the value through web socket.
+
+        Guarded so that only the first caller polls: see _poller_running above.
         """
+        with TimeMachine._poller_lock:
+            if TimeMachine._poller_running:
+                print("Polling already running, not starting a second poller.")
+                return
+            TimeMachine._poller_running = True
+
         while True:
             try:
                 if not self.time_machine_state['active'] and self.time_machine_state['timestamp'] is None:
